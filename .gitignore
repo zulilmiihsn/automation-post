@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment and Secrets
+.env
+.env*.local
+*.pem
+*.key
+
+# Database and live data
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Browser Profiles and Session Data
+profiles/
+profiles_backup/
+
+# Binary assets, scraped images, temporary screenshots
+assets/
+screenshot_*.png
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.webm
+
+# Build & Logs
+dist/
+build/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temp scratch
+scratch/
+temp/
+tmp/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.agents/
+.claude/
+.codex/
+.kilo/
+.planning/
+.claw/
+.claw.json
+skills-lock.json

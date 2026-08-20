@@ -1,0 +1,655 @@
+.container {
+  display: block;
+}
+
+.headerActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.headerTitle {
+  font-size: 1.25rem;
+  margin: 0;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.btnGroup {
+  display: flex;
+  gap: 12px;
+}
+
+.btnPadding {
+  padding: 8px 16px;
+}
+
+/* PREMIUM TOGGLE CLASSES */
+.premiumToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  flex: 1;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+.premiumToggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.premiumToggleActive {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  flex: 1;
+  user-select: none;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+.premiumToggleActive:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.toggleDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.2s;
+  background: var(--text-muted);
+  opacity: 0.4;
+}
+
+.toggleDotActive {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.2s;
+  background: var(--success);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  opacity: 1;
+}
+
+.toggleText {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.toggleTextActive {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--success);
+  letter-spacing: 0.05em;
+}
+
+.customCheckbox {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.customCheckbox:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.customCheckboxChecked {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  background: var(--success);
+  border: 1px solid var(--success);
+}
+
+/* AUTOMATION ENGINE BENTO */
+.bentoEngine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bentoSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bentoLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.bentoStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statusIndicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: background-color 0.3s;
+}
+
+.statusText {
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: color 0.3s;
+}
+
+.bentoStatsGroup {
+  display: flex;
+  gap: 32px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0 32px;
+}
+
+.bentoStatItem {
+  text-align: center;
+}
+
+.bentoStatsVal {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.bentoStatsLabel {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.bentoActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* GRID HEADER */
+.gridHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.selectAllWrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.selectAllText {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* LISTINGS GRID */
+.listingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.noItemsCard {
+  grid-column: 1 / -1;
+  padding: 80px;
+  text-align: center;
+  color: var(--text-muted);
+  border-radius: 16px;
+}
+
+.noItemsIconWrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg);
+  margin-bottom: 16px;
+}
+
+.noItemsTitle {
+  font-size: 1.2rem;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.noItemsDesc {
+  margin: 0;
+  max-width: 300px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.5;
+}
+
+/* PRODUCT CARD */
+.itemCard {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.imageWrapper {
+  width: 100%;
+  height: 200px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.firstImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.noImageWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.noImageText {
+  font-size: 0.8rem;
+}
+
+.itemCheckbox {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  cursor: pointer;
+}
+
+.itemTitle {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.itemToggles {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.itemMeta {
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.metaLabel {
+  color: var(--text-muted);
+}
+
+.metaVal {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.metaDivider {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+
+.metaPrice {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.itemActions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.btnEdit {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.btnDelete {
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* FLOATING BAR */
+.floatingActionBar {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(12, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.15);
+  z-index: 100;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.floatingSelectedInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.badgeCount {
+  background: var(--primary);
+  color: #fff;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.badgeLabel {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.verticalDivider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.floatingControls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.controlGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.controlIndicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlCircle {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.5;
+}
+
+.controlLabel {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.toggleContainer {
+  display: flex;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 100px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 2px;
+}
+
+.toggleBtnOn {
+  padding: 5px 14px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 100px;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.toggleBtnOn:hover {
+  background: rgba(16, 185, 129, 0.25);
+}
+
+.toggleBtnOff {
+  padding: 5px 14px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.toggleBtnOff:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btnBulkDelete {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 100px;
+}
+
+.btnBulkClose {
+  padding: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 50%;
+}
+
+.editModalOverlay {
+  align-items: flex-start;
+  padding-top: 4vh;
+}
+
+.editModalContent {
+  max-width: 1200px;
+  width: 95%;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 32px;
+  border-radius: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* GROUP SWITCHER STYLES */
+.groupSwitcherBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+}
+
+.groupPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #18181B;
+  border: 1px solid #27272A;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #A1A1AA;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.groupPill:hover {
+  background: #27272A;
+  color: #FAFAFA;
+  border-color: #3F3F46;
+}
+
+.groupPill:active {
+  transform: scale(0.98);
+}
+
+.groupPillActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #FAFAFA;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+}
+
+.groupPillCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #71717A;
+}
+
+.groupPillCountActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  background: #10B981;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #09090B;
+}
+
+.activeGroupBanner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(18, 18, 20, 0.95), rgba(24, 24, 27, 0.95));
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.groupBadgeIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emptyGroupCard {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 24px;
+  background: #121214;
+  border: 1px dashed #27272A;
+  border-radius: 20px;
+  margin-top: 12px;
+}
+

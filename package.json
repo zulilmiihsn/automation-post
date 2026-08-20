@@ -1,0 +1,37 @@
+{
+  "name": "automation-post",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --forceExit",
+    "test:parity": "jest tests/parity.test.js --verbose",
+    "wizard": "node scripts/wizard.js",
+    "scrape": "node scripts/scraper.js",
+    "cleanup": "node scripts/cleanup.js",
+    "agent:groq": "node scripts/groqFbAgent.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.16.1",
+    "better-sqlite3": "^12.9.0",
+    "chalk": "^4.1.2",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "fs-extra": "^11.3.4",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "playwright": "^1.60.0",
+    "playwright-core": "^1.60.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "eslint": "^10.5.0",
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
+  }
+}
