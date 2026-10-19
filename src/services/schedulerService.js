@@ -110,20 +110,21 @@ class SchedulerService {
         return;
       }
 
-      // Listen for completion
-      queue.once('done', () => {
+      // Listen for completion. Queue emits the child outcome so schedules
+      // are not marked successful when the child exits non-zero or is stopped.
+      queue.once('done', (outcome) => {
         try {
+          const ok = Boolean(outcome && outcome.success);
           DataService.markScheduleRun(sched.id);
           DataService.addNotification({
-            type: 'success',
-            title: 'Scheduled Automation Complete',
-            message: `"${sched.name}" finished successfully.`,
+            type: ok ? 'success' : 'error',
+            title: ok ? 'Scheduled Automation Complete' : 'Scheduled Automation Failed',
+            message: ok
+              ? `"${sched.name}" finished successfully.`
+              : `"${sched.name}" failed (exit: ${outcome?.code ?? 'unknown'}).`,
           });
         } catch { /* non-critical */ }
       });
-
-      // Mark as run regardless (fire-and-forget update)
-      DataService.markScheduleRun(sched.id);
     } catch (err) {
       logger.error(`Error executing schedule ${sched.id}: ${err.message}`);
       try {

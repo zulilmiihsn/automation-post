@@ -121,7 +121,14 @@ class JobQueue extends EventEmitter {
 		} catch (_e) {}
 
 		this.emit("status", this.getStatus());
-		this.emit("done");
+		this.emit("done", {
+			mode,
+			label,
+			code,
+			error: error ? error.message : null,
+			manual: wasManual,
+			success: !error && code === 0 && !wasManual,
+		});
 	}
 
 	/**

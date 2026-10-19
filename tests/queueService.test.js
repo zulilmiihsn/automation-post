@@ -71,6 +71,42 @@ describe("QueueService exclusive automation lock", () => {
 		expect(QueueService.getRunningModes()).toEqual([]);
 	});
 
+	test("emits a successful done outcome for scheduler decisions", () => {
+		const marketplace = QueueService.getQueue("marketplace");
+		const done = jest.fn();
+		marketplace.once("done", done);
+
+		expect(marketplace.startFullAutomation("marketplace")).toBe(true);
+		procs[0].emit("close", 0);
+
+		expect(done).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "marketplace",
+				code: 0,
+				manual: false,
+				success: true,
+			}),
+		);
+	});
+
+	test("emits a failed done outcome for a non-zero child exit", () => {
+		const marketplace = QueueService.getQueue("marketplace");
+		const done = jest.fn();
+		marketplace.once("done", done);
+
+		expect(marketplace.startFullAutomation("marketplace")).toBe(true);
+		procs[0].emit("close", 1);
+
+		expect(done).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "marketplace",
+				code: 1,
+				manual: false,
+				success: false,
+			}),
+		);
+	});
+
 	test("scraper uses the same lock and receives profile and group env", () => {
 		const marketplace = QueueService.getQueue("marketplace");
 		const scraper = QueueService.getQueue("scraper");

@@ -32,15 +32,17 @@ const SUCCESS_TEXT = [
 ];
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEFAULT_MAX_ACTIONS = 20;
+const VERIFY_RELOAD_DELAY_MS = Number(process.env.SUNDUL_VERIFY_RELOAD_DELAY_MS) || 1800;
 
 function parseCliArgs(argv = process.argv.slice(2)) {
 	const autoMode = argv.includes("--auto");
 	const dryRun = argv.includes("--dry-run");
 	const maxArg = argv.find((arg) => arg.startsWith("--max="));
-	const parsedMax = maxArg ? Number(maxArg.slice("--max=".length)) : Number.POSITIVE_INFINITY;
+	const parsedMax = maxArg ? Number(maxArg.slice("--max=".length)) : DEFAULT_MAX_ACTIONS;
 	const maxActions = Number.isInteger(parsedMax) && parsedMax > 0
 		? Math.min(parsedMax, 100)
-		: Number.POSITIVE_INFINITY;
+		: DEFAULT_MAX_ACTIONS;
 	const titlesArg = argv.find((arg) => arg.startsWith("--titles="));
 	const titles = titlesArg
 		? titlesArg
@@ -712,6 +714,32 @@ async function clickModalDetailRenew(page, targetTitle) {
 	return result;
 }
 
+/**
+ * Verifikasi cadangan setelah klik renew: reload halaman selling, lalu cek
+ * apakah aksi renew untuk listing yang sama sekarang disabled/cooldown.
+ * Kalau iya, kemungkinan besar klik tadi berhasil walau toast sukses tidak muncul.
+ * @returns {Promise<{ renewUnavailable: boolean, reason: string }>}
+ */
+async function verifyRenewAfterReload(page, listing) {
+	try {
+		logger.info(`[DEBUG] [VERIFIKASI] Reload halaman selling untuk memastikan status "${listing.title}"...`);
+		await page.goto(SELLING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+		await delay(VERIFY_RELOAD_DELAY_MS);
+
+		const menu = await openListingMenu(page, listing);
+		const renewUnavailable = Boolean(menu.opened && menu.renewAction && !menu.renewAction.enabled);
+		const reason = menu.opened
+			? (menu.renewAction ? "cooldown-active" : "renew-action-missing")
+			: "menu-not-found";
+		await closeOverlays(page);
+		return { renewUnavailable, reason };
+	} catch (error) {
+		await closeOverlays(page).catch(() => {});
+		logger.warn(`[DEBUG] [VERIFIKASI] Gagal verifikasi post-reload "${listing.title}": ${error.message}.`);
+		return { renewUnavailable: false, reason: `verify-error:${error.message}` };
+	}
+}
+
 async function renewListing(page, listing) {
 	if (!page.url().includes("/marketplace/you/selling")) {
 		await page.goto(SELLING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -740,15 +768,21 @@ async function renewListing(page, listing) {
 		// Handle konfirmasi jika ada modal konfirmasi tambahan
 		await clickConfirmationIfPresent(page);
 		const successSignal = await waitForSuccessSignal(page, 6500);
-		await closeOverlays(page);
 
 		if (isRenewVerified({ successSignal })) {
+			await closeOverlays(page);
 			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via Jalur 1 (Menu Dropdown).`);
 			return { success: true, reason: "menu-dropdown-success" };
 		}
 
+		const reloadCheck = await verifyRenewAfterReload(page, listing);
+		if (isRenewVerified({ renewUnavailable: reloadCheck.renewUnavailable })) {
+			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via cooldown post-reload (${reloadCheck.reason}).`);
+			return { success: true, reason: "post-reload-cooldown" };
+		}
+
 		logger.warn(
-			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 1 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}".`,
+			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 1 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}" (${reloadCheck.reason}).`,
 		);
 		return { success: false, reason: "unverified" };
 	}
@@ -765,15 +799,21 @@ async function renewListing(page, listing) {
 		await delay(800);
 		await clickConfirmationIfPresent(page);
 		const successSignal = await waitForSuccessSignal(page, 6500);
-		await closeOverlays(page);
 
 		if (isRenewVerified({ successSignal })) {
+			await closeOverlays(page);
 			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via Jalur 2 (Modal Dialog).`);
 			return { success: true, reason: "modal-dialog-success" };
 		}
 
+		const reloadCheck = await verifyRenewAfterReload(page, listing);
+		if (isRenewVerified({ renewUnavailable: reloadCheck.renewUnavailable })) {
+			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via cooldown post-reload (${reloadCheck.reason}).`);
+			return { success: true, reason: "post-reload-cooldown" };
+		}
+
 		logger.warn(
-			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 2 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}".`,
+			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 2 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}" (${reloadCheck.reason}).`,
 		);
 		return { success: false, reason: "unverified" };
 	}
@@ -863,6 +903,12 @@ async function processAccount(account, cli) {
 		);
 		const eligibleTargets = selectTargets({ ...cli, listings, recentKeys, localListings });
 		const targets = eligibleTargets.slice(0, cli.maxActions);
+		if (eligibleTargets.length > targets.length) {
+			logger.info(
+				`Dibatasi ke ${targets.length} dari ${eligibleTargets.length} target eligible ` +
+				`(max ${cli.maxActions} per run). Sisa target akan dicoba pada run berikutnya.`,
+			);
+		}
 
 		const eligibilitySummary = listings.reduce((summary, listing) => {
 			let result = evaluateListingEligibility(listing, { recentKeys });
@@ -961,6 +1007,8 @@ async function processSundul(argv = process.argv.slice(2)) {
 
 	let globalSuccessCount = 0;
 	let globalAttemptedCount = 0;
+	let failedAccounts = 0;
+	let restrictedAccounts = 0;
 	for (let index = 0; index < accounts.length; index += 1) {
 		const account = accounts[index];
 		logger.info(`[AKUN ${index + 1}/${accounts.length}] Memulai Sundul untuk ${account.name}.`);
@@ -968,29 +1016,48 @@ async function processSundul(argv = process.argv.slice(2)) {
 			const result = await processAccount(account, cli);
 			globalSuccessCount += result.successCount;
 			globalAttemptedCount += result.attemptedCount;
-			if (!result.restricted) {
+			if (result.restricted) {
+				restrictedAccounts += 1;
+			} else {
 				logger.success(
 					`Sundul selesai untuk ${account.name}. Terverifikasi: ` +
 					`${result.successCount}/${result.attemptedCount}.`,
 				);
 			}
 		} catch (error) {
+			failedAccounts += 1;
 			logger.error(`Kesalahan bot Sundul untuk ${account.name}`, error);
 		}
 	}
 
-	logger.success(
-		`Semua proses Sundul selesai. Total terverifikasi: ` +
-		`${globalSuccessCount}/${globalAttemptedCount}.`,
-	);
-	return { successCount: globalSuccessCount, attemptedCount: globalAttemptedCount };
+	const success = failedAccounts === 0 && restrictedAccounts === 0;
+	const summary =
+		`Total terverifikasi: ${globalSuccessCount}/${globalAttemptedCount}. ` +
+		`Akun gagal: ${failedAccounts}, akun dibatasi: ${restrictedAccounts}.`;
+	if (success) {
+		logger.success(`Semua proses Sundul selesai. ${summary}`);
+	} else {
+		logger.error(`Sundul selesai dengan masalah. ${summary}`);
+	}
+
+	return {
+		successCount: globalSuccessCount,
+		attemptedCount: globalAttemptedCount,
+		failedAccounts,
+		restrictedAccounts,
+		success,
+	};
 }
 
 if (require.main === module) {
-	processSundul().catch((error) => {
-		logger.error("Proses Sundul gagal", error);
-		process.exitCode = 1;
-	});
+	processSundul()
+		.then((result) => {
+			if (!result.success) process.exitCode = 1;
+		})
+		.catch((error) => {
+			logger.error("Proses Sundul gagal", error);
+			process.exitCode = 1;
+		});
 }
 
 module.exports = {

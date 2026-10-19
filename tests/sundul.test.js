@@ -117,4 +117,11 @@ describe("Sundul rules", () => {
 			maxActions: 1,
 		});
 	});
+
+	test("caps default actions at 20 and clamps explicit max at 100", () => {
+		expect(parseCliArgs(["--auto"]).maxActions).toBe(20);
+		expect(parseCliArgs(["--auto", "--max=5"]).maxActions).toBe(5);
+		expect(parseCliArgs(["--auto", "--max=999"]).maxActions).toBe(100);
+		expect(parseCliArgs(["--auto", "--max=0"]).maxActions).toBe(20);
+	});
 });

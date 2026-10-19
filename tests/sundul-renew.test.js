@@ -1,4 +1,7 @@
 process.env.NODE_ENV = "test";
+process.env.SUNDUL_VERIFY_RELOAD_DELAY_MS = "10";
+
+jest.setTimeout(10000);
 
 jest.mock("../src/utils/logger", () =>
 	jest.fn().mockImplementation(() => ({
@@ -19,19 +22,22 @@ jest.mock("../src/core/browserManager", () => jest.fn());
 
 const { renewListing, selectTargets } = require("../scripts/sundul");
 
-function createMenuPage({ successSignal, renewEnabled = true } = {}) {
-	let menuQueried = false;
-
-	const menuElement = {
+function createMenuElement(enabled) {
+	return {
 		isVisible: jest.fn(async () => true),
 		innerText: jest.fn(async () => "Perbarui"),
 		getAttribute: jest.fn(async (name) => {
-			if (!renewEnabled && name === "aria-disabled") return "true";
-			if (!renewEnabled && name === "disabled") return "";
+			if (!enabled && name === "aria-disabled") return "true";
+			if (!enabled && name === "disabled") return "";
 			return null;
 		}),
 		click: jest.fn(async () => {}),
 	};
+}
+
+function createMenuPage({ successSignal, renewEnabled = true, postReloadRenewEnabled = true } = {}) {
+	const menus = [createMenuElement(renewEnabled), createMenuElement(postReloadRenewEnabled)];
+	let menuIndex = 0;
 
 	const optionElement = {
 		scrollIntoViewIfNeeded: jest.fn(async () => {}),
@@ -42,9 +48,10 @@ function createMenuPage({ successSignal, renewEnabled = true } = {}) {
 		url: jest.fn(() => "https://www.facebook.com/marketplace/you/selling"),
 		goto: jest.fn(async () => {}),
 		$$: jest.fn(async (selector) => {
-			if (selector.includes('[role="menuitem"]') && !menuQueried) {
-				menuQueried = true;
-				return [menuElement];
+			if (selector.includes('[role="menuitem"]')) {
+				const menu = menus[Math.min(menuIndex, menus.length - 1)];
+				menuIndex += 1;
+				return [menu];
 			}
 			return [];
 		}),
@@ -59,7 +66,7 @@ function createMenuPage({ successSignal, renewEnabled = true } = {}) {
 		keyboard: { press: jest.fn(async () => {}) },
 	};
 
-	return { page, menuElement, optionElement };
+	return { page, menus, menuElement: menus[0], optionElement };
 }
 
 describe("renewListing verification", () => {
@@ -77,6 +84,23 @@ describe("renewListing verification", () => {
 		const result = await renewListing(page, { title: "Honda Beat 2024" });
 
 		expect(result).toEqual({ success: true, reason: "menu-dropdown-success" });
+	});
+
+	test("verifies success via post-reload cooldown when no toast appears", async () => {
+		const { page, menus } = createMenuPage({ successSignal: false, postReloadRenewEnabled: false });
+
+		const result = await renewListing(page, { title: "Honda Beat 2024" });
+
+		expect(result).toEqual({ success: true, reason: "post-reload-cooldown" });
+		expect(menus[0].click).toHaveBeenCalled();
+	});
+
+	test("stays unverified when post-reload renew action is still enabled", async () => {
+		const { page } = createMenuPage({ successSignal: false, postReloadRenewEnabled: true });
+
+		const result = await renewListing(page, { title: "Honda Beat 2024" });
+
+		expect(result).toEqual({ success: false, reason: "unverified" });
 	});
 
 	test("does not click renew while the menu action is in cooldown", async () => {

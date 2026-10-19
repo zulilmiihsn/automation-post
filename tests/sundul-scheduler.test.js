@@ -34,6 +34,7 @@ const DataService = require("../src/web/services/dataService");
 const QueueService = require("../src/web/services/queueService");
 const startSundul = QueueService._startSundul;
 const startFullAutomation = QueueService._startFullAutomation;
+const once = QueueService._once;
 
 describe("Sundul scheduler", () => {
 	beforeEach(() => {
@@ -51,6 +52,28 @@ describe("Sundul scheduler", () => {
 
 		expect(startSundul).toHaveBeenCalledWith("auto", "Semua Akun Aktif", null, null);
 		expect(startFullAutomation).not.toHaveBeenCalled();
+
+		const done = once.mock.calls[0][1];
+		done({ success: true, code: 0 });
 		expect(DataService.markScheduleRun).toHaveBeenCalledWith(41);
+		expect(DataService.addNotification).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "success" }),
+		);
+	});
+
+	test("marks schedule failed when the child exits non-zero", async () => {
+		await scheduler._executeSchedule({
+			id: 42,
+			name: "Auto Sundul Gagal",
+			mode: "sundul",
+			account_id: null,
+		});
+
+		const done = once.mock.calls[0][1];
+		done({ success: false, code: 1 });
+		expect(DataService.markScheduleRun).toHaveBeenCalledWith(42);
+		expect(DataService.addNotification).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "error" }),
+		);
 	});
 });
