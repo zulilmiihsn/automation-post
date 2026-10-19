@@ -53,7 +53,11 @@ class AgentController {
 		if (started) {
 			res.json({ success: true, message: "AI Agent dimulai" });
 		} else {
-			res.status(400).json({ error: "AI Agent sudah berjalan" });
+			const running = QueueService.getRunningModes();
+			const error = running.length
+				? `Masih ada proses otomasi berjalan: ${running.join(", ")}. Hentikan dulu.`
+				: "AI Agent sudah berjalan";
+			res.status(400).json({ error });
 		}
 	}
 

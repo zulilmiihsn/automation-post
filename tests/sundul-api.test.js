@@ -3,6 +3,7 @@ jest.mock("../src/web/services/queueService", () => {
 	return {
 		_startSundul: startSundul,
 		getQueue: jest.fn(() => ({ startSundul })),
+		getRunningModes: jest.fn(() => []),
 		isAnyRunning: jest.fn(() => false),
 	};
 });

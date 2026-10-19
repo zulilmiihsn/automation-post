@@ -1,11 +1,18 @@
 const path = require("node:path");
-const { spawn } = require("node:child_process");
 const DataService = require("../services/dataService");
 const QueueService = require("../services/queueService");
 const { normalizeFacebookUrl } = require("../../utils/facebookUrl");
 
 const AUTOMATION_MODES = new Set(["all", "viral", "marketplace", "comment", "chat"]);
 const STOPPABLE_MODES = new Set([...AUTOMATION_MODES, "sundul"]);
+
+function queueBusyMessage(requestedMode) {
+	const running = typeof QueueService.getRunningModes === "function"
+		? QueueService.getRunningModes()
+		: [];
+	if (running.length === 0) return `Otomasi ${requestedMode} sudah berjalan`;
+	return `Masih ada proses otomasi berjalan: ${running.join(", ")}. Hentikan dulu.`;
+}
 
 class AutomationController {
 	static getAutomationStatus(_req, res) {
@@ -17,6 +24,8 @@ class AutomationController {
 			isRunningSundul: allQueues.sundul ? allQueues.sundul.isRunning : false,
 			isRunningChat: allQueues.chat ? allQueues.chat.isRunning : false,
 			isRunningAgent: allQueues.agent ? allQueues.agent.isRunning : false,
+			isRunningScraper: allQueues.scraper ? allQueues.scraper.isRunning : false,
+			runningModes: QueueService.getRunningModes(),
 			isAnyRunning: QueueService.isAnyRunning()
 		});
 	}
@@ -35,7 +44,7 @@ class AutomationController {
 		if (started) {
 			res.json({ success: true, message: `Otomasi ${runMode} dimulai` });
 		} else {
-			res.status(400).json({ error: `Otomasi ${runMode} sudah berjalan` });
+			res.status(400).json({ error: queueBusyMessage(runMode) });
 		}
 	}
 
@@ -57,10 +66,8 @@ class AutomationController {
 	}
 
 	static async runScraper(req, res) {
-		if (QueueService.getStatus().isRunning) {
-			return res.status(400).json({
-				error: "Otomasi sedang berjalan, hentikan dulu sebelum scraping.",
-			});
+		if (QueueService.isAnyRunning()) {
+			return res.status(400).json({ error: queueBusyMessage("scraper") });
 		}
 
 		const { url: rawUrl, groupId } = req.body || {};
@@ -83,42 +90,21 @@ class AutomationController {
 		}
 
 		const profileDir = path.join(__dirname, "../../../", account.profile);
-		const scraperPath = path.join(__dirname, "../../../scripts/scraper.js");
-		const args = [scraperPath];
-		if (url) args.push(url);
+		const queue = QueueService.getQueue("scraper");
+		const started = queue.startScraper(url, profileDir, groupId);
+		if (!started) {
+			return res.status(400).json({ error: queueBusyMessage("scraper") });
+		}
 
-		res.json({
+		return res.json({
 			success: true,
 			message: `Scraper dimulai dengan akun ${account.fbName || account.name}.`,
-		});
-
-		const env = { ...process.env, SCRAPER_PROFILE_DIR: profileDir };
-		if (groupId) env.SCRAPER_GROUP_ID = String(groupId);
-
-		const child = spawn("node", args, {
-			env,
-			cwd: path.join(__dirname, "../../../"),
-		});
-
-		const emit = (line) => QueueService.emit("log", `[SCRAPER] ${line.trim()}`);
-		child.stdout.on("data", (data) => {
-			data.toString().split("\n").filter((l) => l.trim()).forEach(emit);
-		});
-		child.stderr.on("data", (data) => {
-			data.toString().split("\n").filter((l) => l.trim()).forEach((l) => emit(`[WARN] ${l}`));
-		});
-		child.on("close", (code) => {
-			emit(code === 0
-				? "Scraping selesai! Refresh database untuk melihat hasil."
-				: `Scraper berhenti dengan kode ${code}.`);
 		});
 	}
 
 	static async runSundul(req, res) {
 		if (QueueService.isAnyRunning()) {
-			return res.status(400).json({
-				error: "Otomasi sedang berjalan, hentikan dulu sebelum sundul.",
-			});
+			return res.status(400).json({ error: queueBusyMessage("sundul") });
 		}
 
 		const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
@@ -172,7 +158,7 @@ class AutomationController {
 				: `Sundul ${targetTitles.length} postingan dimulai untuk ${targetAccountName}.`;
 			res.json({ success: true, message: msg });
 		} else {
-			res.status(400).json({ error: "Proses sundul sudah berjalan" });
+			res.status(400).json({ error: queueBusyMessage("sundul") });
 		}
 	}
 }

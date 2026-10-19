@@ -37,6 +37,7 @@ class JobQueue extends EventEmitter {
 		this.currentProcess = null;
 		this.logs = [];
 		this._stoppedManually = false;
+		this._forceKillTimer = null;
 	}
 
 	addLog(msg) {
@@ -63,8 +64,64 @@ class JobQueue extends EventEmitter {
 	getStatus() {
 		return {
 			isRunning: this.isRunning,
+			stopping: this._stoppedManually,
 			queueLength: this.queue.length,
 		};
+	}
+
+	/**
+	 * Mode lain yang sedang memegang lock global.
+	 * Satu proses otomasi saja untuk mencegah dua browser/akun bertabrakan.
+	 * @returns {string|null}
+	 */
+	_getBusyMode() {
+		const busy = Object.entries(queues).find(
+			([mode, queue]) => mode !== this.queueMode && queue.isRunning,
+		);
+		return busy ? busy[0] : null;
+	}
+
+	/**
+	 * Satu-satunya pintu keluar proses child: lepas lock, simpan state, emit status.
+	 * @param {import("node:child_process").ChildProcess} proc
+	 * @param {string} mode
+	 * @param {string} label
+	 * @param {number|null} code
+	 * @param {Error|null} error
+	 */
+	_finalizeProcess(proc, mode, label, code, error = null) {
+		if (this.currentProcess !== proc) return;
+
+		if (this._forceKillTimer) {
+			clearTimeout(this._forceKillTimer);
+			this._forceKillTimer = null;
+		}
+
+		const wasManual = this._stoppedManually;
+		this._stoppedManually = false;
+
+		if (error) {
+			this.addLog(`[ERROR] ${label} gagal: ${error.message}`);
+		} else if (wasManual) {
+			this.addLog(`SYSTEM: ${label} dihentikan.`);
+		} else {
+			this.addLog(`SYSTEM: ${label} selesai dengan kode ${code}`);
+		}
+
+		this.isRunning = false;
+		this.currentProcess = null;
+		this._unwireLogPersist();
+
+		try {
+			const DataService = require("./dataService");
+			DataService.setQueueState(mode, {
+				running: false,
+				endedAt: new Date().toISOString(),
+			});
+		} catch (_e) {}
+
+		this.emit("status", this.getStatus());
+		this.emit("done");
 	}
 
 	/**
@@ -80,8 +137,15 @@ class JobQueue extends EventEmitter {
 	_spawnProcess(scriptPath, args, mode, label, { envOverrides, stderrLevel, stderrFilter } = {}) {
 		if (this.isRunning) return false;
 
+		const busyMode = this._getBusyMode();
+		if (busyMode) {
+			this.addLog(`SYSTEM: ${label} tidak dimulai; mode ${busyMode} masih berjalan.`);
+			return false;
+		}
+
 		this.isRunning = true;
 		this.logs = [];
+		this._stoppedManually = false;
 		this.addLog(`SYSTEM: Memulai ${label}...`);
 		this.emit("status", this.getStatus());
 
@@ -89,21 +153,39 @@ class JobQueue extends EventEmitter {
 		this._wireLogPersist(mode);
 
 		const env = { ...process.env, ...envOverrides };
-		this.currentProcess = spawn("node", [scriptPath, ...args], {
-			cwd: path.join(__dirname, "../../../"),
-			env,
-		});
+		let child;
+		try {
+			child = spawn("node", [scriptPath, ...args], {
+				cwd: path.join(__dirname, "../../../"),
+				env,
+			});
+		} catch (error) {
+			this.addLog(`[ERROR] Gagal memulai ${label}: ${error.message}`);
+			this.isRunning = false;
+			this._unwireLogPersist();
+			try {
+				const DataService = require("./dataService");
+				DataService.setQueueState(mode, {
+					running: false,
+					endedAt: new Date().toISOString(),
+				});
+			} catch (_e) {}
+			this.emit("status", this.getStatus());
+			return false;
+		}
+
+		this.currentProcess = child;
 
 		try {
 			const DataService = require("./dataService");
 			DataService.setQueueState(mode, {
 				running: true,
-				pid: this.currentProcess.pid || null,
+				pid: child.pid || null,
 				startedAt: new Date().toISOString(),
 			});
 		} catch (_e) {}
 
-		this.currentProcess.stdout.on("data", (data) => {
+		child.stdout.on("data", (data) => {
 			data.toString()
 				.split("\n")
 				.forEach((l) => {
@@ -112,7 +194,7 @@ class JobQueue extends EventEmitter {
 				});
 		});
 
-		this.currentProcess.stderr.on("data", (data) => {
+		child.stderr.on("data", (data) => {
 			data.toString()
 				.split("\n")
 				.forEach((l) => {
@@ -124,27 +206,8 @@ class JobQueue extends EventEmitter {
 				});
 		});
 
-		this._stoppedManually = false;
-
-		this.currentProcess.on("close", (code) => {
-			if (this._stoppedManually) {
-				this._stoppedManually = false;
-				return;
-			}
-			this.addLog(`SYSTEM: ${label} selesai dengan kode ${code}`);
-			this.isRunning = false;
-			this.currentProcess = null;
-			this._unwireLogPersist();
-			try {
-				const DataService = require("./dataService");
-				DataService.setQueueState(mode, {
-					running: false,
-					endedAt: new Date().toISOString(),
-				});
-			} catch (_e) {}
-			this.emit("status", this.getStatus());
-			this.emit("done");
-		});
+		child.on("close", (code) => this._finalizeProcess(child, mode, label, code));
+		child.on("error", (error) => this._finalizeProcess(child, mode, label, null, error));
 
 		return true;
 	}
@@ -198,7 +261,7 @@ class JobQueue extends EventEmitter {
 		);
 	}
 
-	startScraper(url = null, profileDir = null) {
+	startScraper(url = null, profileDir = null, groupId = null) {
 		const args = [];
 		if (url) args.push(url);
 
@@ -209,7 +272,9 @@ class JobQueue extends EventEmitter {
 			headless = (configVal === "0" || configVal === "false" || configVal === false) ? "false" : "true";
 		} catch (e) {}
 
-		const envOverrides = profileDir ? { SCRAPER_PROFILE_DIR: profileDir } : {};
+		const envOverrides = {};
+		if (profileDir) envOverrides.SCRAPER_PROFILE_DIR = profileDir;
+		if (groupId) envOverrides.SCRAPER_GROUP_ID = String(groupId);
 		envOverrides.HEADLESS = headless;
 
 		return this._spawnProcess(
@@ -254,13 +319,21 @@ class JobQueue extends EventEmitter {
 
 	stopAutomation() {
 		if (this.isRunning && this.currentProcess) {
+			if (this._stoppedManually) return true;
+
 			const proc = this.currentProcess;
 			this.addLog("SYSTEM: Mengirim sinyal stop (SIGTERM)...");
 			this._stoppedManually = true;
-			proc.kill("SIGTERM");
 
-			// Fallback: force kill after 5s
-			const forceKillTimer = setTimeout(() => {
+			try {
+				proc.kill("SIGTERM");
+			} catch (error) {
+				this.addLog(`[ERROR] Gagal mengirim SIGTERM: ${error.message}`);
+			}
+
+			// Fallback: force kill after 5s. Lock tetap dipegang sampai child close.
+			if (this._forceKillTimer) clearTimeout(this._forceKillTimer);
+			this._forceKillTimer = setTimeout(() => {
 				try {
 					proc.kill("SIGKILL");
 					this.addLog("SYSTEM: Force kill (SIGKILL) karena proses tidak merespon.");
@@ -268,20 +341,8 @@ class JobQueue extends EventEmitter {
 					/* already dead */
 				}
 			}, 5000);
+			if (this._forceKillTimer.unref) this._forceKillTimer.unref();
 
-			proc.once("close", () => clearTimeout(forceKillTimer));
-
-			this.addLog("SYSTEM: Otomasi dihentikan.");
-			this.isRunning = false;
-			this.currentProcess = null;
-			this._unwireLogPersist();
-			try {
-				const DataService = require("./dataService");
-				DataService.setQueueState(this.queueMode, {
-					running: false,
-					endedAt: new Date().toISOString(),
-				});
-			} catch (_e) {}
 			this.emit("status", this.getStatus());
 			return true;
 		}
@@ -323,6 +384,12 @@ const queues = {
 	sundul: new JobQueue("sundul"),
 };
 
+function getRunningModes() {
+	return Object.entries(queues)
+		.filter(([, queue]) => queue.isRunning)
+		.map(([mode]) => mode);
+}
+
 module.exports = {
 	getQueue: (mode) => {
 		const targetMode = mode || "all";
@@ -332,7 +399,8 @@ module.exports = {
 		return queues[targetMode];
 	},
 	getAllQueues: () => queues,
-	isAnyRunning: () => Object.values(queues).some((queue) => queue.isRunning),
+	getRunningModes,
+	isAnyRunning: () => getRunningModes().length > 0,
 	// Compatibility properties for backward compat with default root tests / generic imports
 	startFullAutomation: (mode, accountId) =>
 		module.exports.getQueue(mode).startFullAutomation(mode, accountId),
