@@ -562,7 +562,17 @@ async function openListingMenu(page, listing) {
 
 async function clickConfirmationIfPresent(page) {
 	await delay(500);
-	const candidates = await page.$$(MENU_ITEM_SELECTOR);
+	const dialogs = await page.$$('[role="dialog"]').catch(() => []);
+	let dialog = null;
+	for (const candidate of dialogs) {
+		if (await candidate.isVisible().catch(() => false)) {
+			dialog = candidate;
+			break;
+		}
+	}
+	if (!dialog) return false;
+
+	const candidates = await dialog.$$(MENU_ITEM_SELECTOR).catch(() => []);
 	for (const candidate of candidates) {
 		if (!(await candidate.isVisible().catch(() => false))) continue;
 		const text = normalizeTitle(await candidate.innerText().catch(() => ""));
@@ -587,7 +597,8 @@ async function clickConfirmationIfPresent(page) {
 			continue;
 		}
 		const ariaDisabled = await candidate.getAttribute("aria-disabled");
-		if (ariaDisabled === "true") continue;
+		const disabled = await candidate.getAttribute("disabled");
+		if (ariaDisabled === "true" || disabled !== null) continue;
 		logger.info(`[DEBUG] [KLIK SUKSES] Modal dialog muncul, mengklik konfirmasi: "${value}"`);
 		await candidate.click({ timeout: 3000 });
 		return true;
@@ -728,11 +739,18 @@ async function renewListing(page, listing) {
 
 		// Handle konfirmasi jika ada modal konfirmasi tambahan
 		await clickConfirmationIfPresent(page);
-		await waitForSuccessSignal(page, 2000);
+		const successSignal = await waitForSuccessSignal(page, 6500);
 		await closeOverlays(page);
 
-		logger.info(`[DEBUG] [STEP LOLOS] Sundul berhasil via Jalur 1 (Menu Dropdown).`);
-		return { success: true, reason: "menu-dropdown-success" };
+		if (isRenewVerified({ successSignal })) {
+			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via Jalur 1 (Menu Dropdown).`);
+			return { success: true, reason: "menu-dropdown-success" };
+		}
+
+		logger.warn(
+			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 1 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}".`,
+		);
+		return { success: false, reason: "unverified" };
 	}
 
 	// ==========================================
@@ -746,11 +764,18 @@ async function renewListing(page, listing) {
 		logger.info(`[DEBUG] [KLIK SUKSES] Tombol "${modalResult.text}" di modal dialog BERHASIL DIKLIK untuk "${listing.title}"`);
 		await delay(800);
 		await clickConfirmationIfPresent(page);
-		await waitForSuccessSignal(page, 2000);
+		const successSignal = await waitForSuccessSignal(page, 6500);
 		await closeOverlays(page);
 
-		logger.info(`[DEBUG] [STEP LOLOS] Sundul berhasil via Jalur 2 (Modal Dialog).`);
-		return { success: true, reason: "modal-dialog-success" };
+		if (isRenewVerified({ successSignal })) {
+			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via Jalur 2 (Modal Dialog).`);
+			return { success: true, reason: "modal-dialog-success" };
+		}
+
+		logger.warn(
+			`[DEBUG] [TIDAK TERVERIFIKASI] Klik Jalur 2 berhasil, tapi Facebook tidak menampilkan sinyal sukses untuk "${listing.title}".`,
+		);
+		return { success: false, reason: "unverified" };
 	}
 
 	await closeOverlays(page);
@@ -761,6 +786,7 @@ async function renewListing(page, listing) {
 function selectTargets({ autoMode, titles, listings, recentKeys, localListings = [] }) {
 	if (autoMode) {
 		const hasCatalog = Array.isArray(localListings) && localListings.length > 0;
+		const selectedKeys = new Set();
 
 		return listings
 			.map((listing) => {
@@ -785,15 +811,24 @@ function selectTargets({ autoMode, titles, listings, recentKeys, localListings =
 					eligibility: evaluateListingEligibility(listing, { recentKeys }),
 				};
 			})
-			.filter((entry) => entry.eligibility.eligible);
+			.filter((entry) => {
+				if (!entry.eligibility.eligible) return false;
+				if (selectedKeys.has(entry.eligibility.key)) return false;
+				selectedKeys.add(entry.eligibility.key);
+				return true;
+			});
 	}
 
 	const selected = [];
+	const selectedKeys = new Set();
 	for (const title of titles) {
 		const best = findBestListingMatch(title, listings);
 		if (!best) continue;
 		const eligibility = evaluateListingEligibility(best.listing, { recentKeys });
-		if (eligibility.eligible) selected.push({ listing: best.listing, eligibility });
+		if (!eligibility.eligible) continue;
+		if (selectedKeys.has(eligibility.key)) continue;
+		selectedKeys.add(eligibility.key);
+		selected.push({ listing: best.listing, eligibility });
 	}
 	return selected;
 }
@@ -882,6 +917,8 @@ async function processAccount(account, cli) {
 
 			if (!result.success) {
 				logger.warn(`Gagal verifikasi sundul "${listing.title}": ${result.reason}.`);
+				// Beri jeda sebelum target berikutnya supaya tidak menembak Facebook terlalu cepat.
+				await delay(400 + Math.floor(Math.random() * 400));
 				continue;
 			}
 
