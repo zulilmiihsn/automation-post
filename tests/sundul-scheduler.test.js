@@ -55,7 +55,7 @@ describe("Sundul scheduler", () => {
 
 		const done = once.mock.calls[0][1];
 		done({ success: true, code: 0 });
-		expect(DataService.markScheduleRun).toHaveBeenCalledWith(41);
+		expect(DataService.markScheduleRun).toHaveBeenCalledWith(41, "success");
 		expect(DataService.addNotification).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "success" }),
 		);
@@ -71,7 +71,21 @@ describe("Sundul scheduler", () => {
 
 		const done = once.mock.calls[0][1];
 		done({ success: false, code: 1 });
-		expect(DataService.markScheduleRun).toHaveBeenCalledWith(42);
+		expect(DataService.markScheduleRun).toHaveBeenCalledWith(42, "failed");
+		expect(DataService.addNotification).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "error" }),
+		);
+	});
+
+	test("marks schedule failed when the account cannot be resolved", async () => {
+		await scheduler._executeSchedule({
+			id: 43,
+			name: "Auto Sundul Tanpa Akun",
+			mode: "sundul",
+			account_id: "akun_hilang",
+		});
+
+		expect(DataService.markScheduleRun).toHaveBeenCalledWith(43, "failed");
 		expect(DataService.addNotification).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "error" }),
 		);

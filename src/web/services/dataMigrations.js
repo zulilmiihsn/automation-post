@@ -212,6 +212,10 @@ function runMigrations(db, fs, files) {
 			CREATE INDEX IF NOT EXISTS idx_automation_runs_started ON automation_runs(started_at);
 		`);
 	});
+
+	apply(6, "add-schedule-last-status", () => {
+		addColumn(db, "automation_schedules", "last_status", "TEXT");
+	});
 }
 
 module.exports = { runMigrations };

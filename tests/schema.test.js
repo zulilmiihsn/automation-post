@@ -17,10 +17,11 @@ describe('database schema and versioned migrations', () => {
             runMigrations(db, fs, legacyFiles);
 
             const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all();
-            expect(versions.map(row => row.version)).toEqual([1, 2, 3, 4, 5]);
+            expect(versions.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
             expect(db.prepare('SELECT name FROM sqlite_master WHERE name = ?').get('automation_events')).toBeDefined();
             expect(db.prepare('SELECT name FROM sqlite_master WHERE name = ?').get('automation_runs')).toBeDefined();
             expect(db.pragma('table_info(automation_events)').some(column => column.name === 'run_id')).toBe(true);
+            expect(db.pragma('table_info(automation_schedules)').some(column => column.name === 'last_status')).toBe(true);
             expect(db.pragma('foreign_key_check')).toEqual([]);
         } finally {
             db.close();

@@ -330,6 +330,16 @@
   gap: 7px;
 }
 
+.scheduleStatusSuccess {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.scheduleStatusFailed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .scheduleForm {
   display: grid;
   gap: 13px;

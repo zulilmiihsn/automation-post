@@ -115,7 +115,7 @@ class SchedulerService {
       queue.once('done', (outcome) => {
         try {
           const ok = Boolean(outcome && outcome.success);
-          DataService.markScheduleRun(sched.id);
+          DataService.markScheduleRun(sched.id, ok ? 'success' : 'failed');
           DataService.addNotification({
             type: ok ? 'success' : 'error',
             title: ok ? 'Scheduled Automation Complete' : 'Scheduled Automation Failed',
@@ -129,6 +129,7 @@ class SchedulerService {
       logger.error(`Error executing schedule ${sched.id}: ${err.message}`);
       try {
         const DataService = require('../web/services/dataService');
+        DataService.markScheduleRun(sched.id, 'failed');
         DataService.addNotification({
           type: 'error',
           title: 'Schedule Failed',

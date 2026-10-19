@@ -459,7 +459,11 @@ export default function Settings({ theme = 'dark', onThemeChange = () => {} }) {
                           <span>{modeLabel}</span>
                           <span>{account ? (account.fbName || account.name) : 'Semua akun'}</span>
                         </div>
-                        <div className={styles.scheduleMeta}>Terakhir: {formatLastRun(schedule.last_run)}</div>
+                        <div className={styles.scheduleMeta}>
+                          <span>Terakhir: {formatLastRun(schedule.last_run)}</span>
+                          {schedule.last_status === 'success' && <span className={styles.scheduleStatusSuccess}>Sukses</span>}
+                          {schedule.last_status === 'failed' && <span className={styles.scheduleStatusFailed}>Gagal</span>}
+                        </div>
                       </div>
                       <div className={styles.scheduleActions}>
                         <button className="btn btn-danger" onClick={() => deleteSchedule(schedule.id)} aria-label={`Hapus jadwal ${schedule.name}`} title="Hapus jadwal" style={{ minHeight: 36, padding: '6px 9px' }}>

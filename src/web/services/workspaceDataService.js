@@ -126,8 +126,11 @@ module.exports = {
 		return db.prepare("DELETE FROM automation_schedules WHERE id = ?").run(id);
 	},
 
-	markScheduleRun(id) {
-		db.prepare("UPDATE automation_schedules SET last_run = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+	markScheduleRun(id, status = "success") {
+		const normalized = status === "failed" ? "failed" : "success";
+		db.prepare(
+			"UPDATE automation_schedules SET last_run = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?",
+		).run(normalized, id);
 	},
 
 	getRecentMarketplaceRenewals(accountId, withinDays = 7) {

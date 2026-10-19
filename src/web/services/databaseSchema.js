@@ -51,7 +51,7 @@ function ensureSchema(db) {
 		CREATE TABLE IF NOT EXISTS automation_schedules (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, cron_expr TEXT NOT NULL,
 			mode TEXT DEFAULT 'all', account_id TEXT, enabled INTEGER DEFAULT 1,
-			last_run DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			last_run DATETIME, last_status TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE TABLE IF NOT EXISTS app_groups (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
