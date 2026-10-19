@@ -3,6 +3,7 @@ const DataService = require("../web/services/dataService");
 const RateLimiter = require("../services/rateLimiter");
 const Logger = require("../utils/logger");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 
 /**
  * Orchestrates Facebook automation workflows across multiple accounts and listings.
@@ -21,6 +22,34 @@ class BotOrchestrator {
 		this.accountId = accountId;
 		this.commentTargetUrl = commentTargetUrl;
 		this.logger = new Logger("ORCHESTRATOR");
+		this.runId = null;
+		this.runStartedAt = null;
+		this.stopped = false;
+		this.activeBots = new Set();
+		this.chatCycles = Number(process.env.CHAT_CYCLES || 0); // 0 = tanpa batas
+		this.chatIntervalMs = Number(process.env.CHAT_INTERVAL_MS || 5000);
+	}
+
+	/**
+	 * Minta loop berhenti + tutup browser aktif. Dipanggil dari SIGINT/SIGTERM.
+	 */
+	async requestStop() {
+		this.stopped = true;
+		for (const bot of Array.from(this.activeBots)) {
+			try {
+				await bot.close();
+			} catch (_e) {}
+		}
+	}
+
+	async _sleepInterruptible(ms) {
+		const step = 100;
+		let waited = 0;
+		while (waited < ms && !this.stopped) {
+			const chunk = Math.min(step, ms - waited);
+			await new Promise((r) => setTimeout(r, chunk));
+			waited += chunk;
+		}
 	}
 
 	/**
@@ -30,20 +59,31 @@ class BotOrchestrator {
 	 * @returns {Promise<void>}
 	 */
 	async run() {
+		this.runId = randomUUID();
+		this.runStartedAt = Date.now();
+		let runStatus = "completed";
+		let runError = null;
+		DataService.startAutomationRun({ runId: this.runId, mode: this.runMode });
 		try {
 			this.logger.info("Mencari listing aktif dan akun...");
 
 			const activeListings = await this._getActiveListings();
 			const linkedAccounts = await this._getLinkedAccounts();
+			DataService.updateAutomationRunScope(this.runId, {
+				accountsCount: linkedAccounts.length,
+				listingsCount: activeListings.length,
+			});
 
 			this.logger.info(`Orchestrator: filter accountId = ${this.accountId || 'tidak ada'}. Akun terhubung ditemukan = ${linkedAccounts.map(a => `${a.fbName || a.name} (${a.id})`).join(', ')}`);
 
 			if (this.runMode !== "chat" && activeListings.length === 0) {
+				runStatus = "skipped";
 				this.logger.warn("Tidak ada listing aktif untuk diposting.");
 				return;
 			}
 
 			if (linkedAccounts.length === 0) {
+				runStatus = "skipped";
 				this.logger.error(
 					"Tidak ada akun Facebook yang tertaut (linked). Mohon login dulu di Dashboard.",
 				);
@@ -55,13 +95,11 @@ class BotOrchestrator {
 			);
 
 			if (this.runMode === "chat") {
-				this.logger.info("Memulai loop Balas Chat berkelanjutan...");
-				while (true) {
-					for (const account of linkedAccounts) {
-						await this._processAccount(account, activeListings);
-					}
-					this.logger.info("Semua akun selesai diperiksa. Mengulang antrean dalam 5 detik...");
-					await new Promise(resolve => setTimeout(resolve, 5000));
+				this.logger.info("Memulai loop Balas Chat (stop: Ctrl+C / requestStop)...");
+				await this._runChatMode(linkedAccounts);
+				if (this.stopped) {
+					runStatus = "stopped";
+					this.logger.warn("Loop chat dihentikan user.");
 				}
 				return;
 			}
@@ -77,6 +115,8 @@ class BotOrchestrator {
 
 			this.logger.success("Semua antrean otomasi selesai.");
 		} catch (err) {
+			runStatus = "failed";
+			runError = err.message || String(err);
 			this.logger.error("Kesalahan fatal:", err);
 		} finally {
 			try {
@@ -84,6 +124,12 @@ class BotOrchestrator {
 			} catch (_e) {
 				this.logger.warn(`Gagal reset hanging listings: ${_e.message}`);
 			}
+			DataService.finishAutomationRun({
+				runId: this.runId,
+				status: runStatus,
+				durationMs: Date.now() - this.runStartedAt,
+				errorMessage: runError,
+			});
 		}
 	}
 
@@ -110,6 +156,19 @@ class BotOrchestrator {
 	async _getLinkedAccounts() {
 		const accounts = await DataService.getAccounts();
 		const activeLinked = accounts.filter((a) => a.linked && a.isActive);
+		if (this.runMode === "chat") {
+			// Toggle per akun: kosong = semua. Mati = tanpa browser + polling.
+			try {
+				const cfg = DataService.getAppConfig();
+				const raw = cfg.chat_enabled_accounts;
+				if (raw) {
+					const enabled = new Set(JSON.parse(raw));
+					const scoped = activeLinked.filter((a) => enabled.has(String(a.id)));
+					if (this.accountId) return scoped.filter((a) => String(a.id) === String(this.accountId));
+					return scoped;
+				}
+			} catch (_e) {}
+		}
 		if (this.accountId) {
 			const selected = activeLinked.filter((a) => String(a.id) === String(this.accountId));
 			if (selected.length === 0) {
@@ -138,14 +197,30 @@ class BotOrchestrator {
 				? account.profile
 				: path.join(process.cwd(), account.profile),
 		});
+		this.activeBots.add(bot);
 
 		try {
+			if (this.stopped) return;
 			await bot.init();
 
 			if (this.runMode === "chat") {
 				this.logger.info(`[${displayName}] Memeriksa inbox...`);
 				try {
-					await bot.replyToChats({ pin: account.e2ee_pin });
+					const res = await bot.replyToChats({ pin: account.e2ee_pin });
+					for (const t of (res && res.threads) || []) {
+						if (t.status !== "replied" && t.status !== "failed") continue;
+						try {
+							DataService.recordAutomationEvent({
+								actionType: "chat_reply",
+								runId: this.runId,
+								mode: "chat",
+								accountId: account.id,
+								result: t.status === "replied" ? "success" : "failed",
+								message: `${t.buyer}: ${t.reply || t.reason || ""}`.slice(0, 200),
+								metadata: { buyer: t.buyer, reply: t.reply || null },
+							});
+						} catch (_e) {}
+					}
 				} catch (e) {
 					this.logger.error(`Error saat cek chat akun ${displayName}:`, e);
 				}
@@ -171,6 +246,7 @@ class BotOrchestrator {
 
 			let count = startIndex;
 			for (let i = startIndex; i < activeListings.length; i++) {
+				if (this.stopped) break;
 				const listing = activeListings[i];
 				count++;
 				let retries = 3;
@@ -221,6 +297,7 @@ class BotOrchestrator {
 				this.logger.error(`[${displayName}] Kesalahan:`, err);
 			}
 		} finally {
+			this.activeBots.delete(bot);
 			await bot.close();
 		}
 	}
@@ -406,6 +483,16 @@ class BotOrchestrator {
 			const feedResult = await bot.postToFeed(feedContent);
 
 			if (feedResult.success) {
+				DataService.recordAutomationEvent({
+					actionType: "feed_post",
+					runId: this.runId,
+					mode: this.runMode,
+					accountId: account.id,
+					listingId: listing.id,
+					result: "success",
+					message: `Post Feed berhasil dibuat: ${listing.title}`,
+					metadata: { postUrl: feedResult.postUrl || null },
+				});
 				if (feedResult.postUrl) {
 					this.logger.success(
 						`[${displayName}] Berhasil posting ke Feed. Link: ${feedResult.postUrl}`,
@@ -423,6 +510,15 @@ class BotOrchestrator {
 				feedError,
 			);
 		}
+		DataService.recordAutomationEvent({
+			actionType: "feed_post",
+			runId: this.runId,
+			mode: this.runMode,
+			accountId: account.id,
+			listingId: listing.id,
+			result: "failed",
+			message: `Post Feed gagal: ${listing.title}`,
+		});
 		return { success: false, url: null };
 	}
 
@@ -438,6 +534,21 @@ class BotOrchestrator {
 				listing.maxGroups || 20,
 				listing.description || ""
 			);
+			for (const result of Array.isArray(shareResults) ? shareResults : []) {
+				if (result.status !== "shared" && result.status !== "failed" && result.status !== "accountRestricted") continue;
+				DataService.recordAutomationEvent({
+					actionType: "group_share",
+					runId: this.runId,
+					mode: this.runMode,
+					accountId: account.id,
+					listingId: listing.id,
+					result: result.status === "shared" ? "success" : "failed",
+					message: result.status === "shared"
+						? `Berhasil share ke grup ${result.group || ""}`.trim()
+						: result.error || `Share grup gagal (${result.status})`,
+					metadata: { group: result.group || null },
+				});
+			}
 
 			if (
 				Array.isArray(shareResults) &&
@@ -459,6 +570,15 @@ class BotOrchestrator {
 				);
 			}
 		} catch (shareError) {
+			DataService.recordAutomationEvent({
+				actionType: "group_share",
+				runId: this.runId,
+				mode: this.runMode,
+				accountId: account.id,
+				listingId: listing.id,
+				result: "failed",
+				message: shareError.message,
+			});
 			this.logger.error(
 				`[${displayName}] Gagal viral share`,
 				shareError,
@@ -525,12 +645,30 @@ class BotOrchestrator {
 
 			if (result?.success) {
 				RateLimiter.recordAction(account.id, "post");
+				DataService.recordAutomationEvent({
+					actionType: "marketplace_post",
+					runId: this.runId,
+					mode: this.runMode,
+					accountId: account.id,
+					listingId: listing.id,
+					result: "success",
+					message: `Berhasil posting Marketplace: ${listing.title}`,
+				});
 				this.logger.method("SUCCESS", "orchestrator.phase.marketplace", `listing=${listing.id}`);
 				this.logger.success(
 					`[${displayName}] Berhasil posting Marketplace: ${listing.title}`,
 				);
 				return true;
 			}
+			DataService.recordAutomationEvent({
+				actionType: "marketplace_post",
+				runId: this.runId,
+				mode: this.runMode,
+				accountId: account.id,
+				listingId: listing.id,
+				result: "failed",
+				message: `Marketplace tidak mengonfirmasi posting: ${listing.title}`,
+			});
 		} else {
 			this.logger.method("SKIP", "orchestrator.phase.marketplace", `runMode=${this.runMode};postMarketplace=${listing.postMarketplace}`);
 		}
@@ -540,6 +678,16 @@ class BotOrchestrator {
 	_handleListingError(account, listing, error) {
 		const displayName = account.fbName || account.name;
 		const classification = this._classifyError(error);
+		DataService.recordAutomationEvent({
+			actionType: "listing_error",
+			runId: this.runId,
+			mode: this.runMode,
+			accountId: account.id,
+			listingId: listing.id,
+			result: "failed",
+			message: `${listing.title}: ${error.message || "Kesalahan automasi"}`,
+			metadata: { classification },
+		});
 
 		if (classification === "FATAL" || error.message === "ACCOUNT_LIMIT_REACHED") {
 			this.logger.warn(
@@ -597,6 +745,132 @@ class BotOrchestrator {
 		return "PERMANENT";
 	}
 
+	async _getPooledBot(pool, account) {
+		const key = String(account.id);
+		let bot = pool.get(key);
+		if (bot && bot.page && !bot.page.isClosed?.()) return bot;
+		if (bot) {
+			try {
+				await bot.close();
+			} catch (_e) {}
+			this.activeBots.delete(bot);
+			pool.delete(key);
+		}
+		const displayName = account.fbName || account.name;
+		bot = new FacebookBot({
+			accountName: displayName,
+			userDataDir: path.isAbsolute(account.profile)
+				? account.profile
+				: path.join(process.cwd(), account.profile),
+		});
+		this.activeBots.add(bot);
+		await bot.init();
+		pool.set(key, bot);
+		return bot;
+	}
+
+	async _closePool(pool) {
+		for (const bot of pool.values()) {
+			try {
+				this.activeBots.delete(bot);
+				await bot.close();
+			} catch (_e) {}
+		}
+		pool.clear();
+	}
+
+	async _syncChatThreadList(bot, account) {
+		try {
+			const url = bot.page.url();
+			if (!url.includes("/marketplace/inbox")) {
+				await bot.page.goto("https://www.facebook.com/marketplace/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+				await new Promise((r) => setTimeout(r, 3000));
+			}
+			const rows = await bot.page.evaluate(() => {
+				const out = [];
+				for (const el of Array.from(document.querySelectorAll('div[role="button"], a[role="link"]'))) {
+					const t = (el.innerText || "").trim();
+					if (!t || t.length < 10 || t.length > 300 || !/·/.test(t)) continue;
+					if (/pesan belum dibaca|dalam \d+\s*km|telusuri|notifikasi|pengaturan/i.test(t)) continue;
+					const lines = t.split("\n").map((l) => l.trim()).filter((l) => l && l !== "·");
+					const buyer = (lines[0] || "").slice(0, 80);
+					if (!buyer || buyer.length > 40 || /[:\d]{4,}/.test(buyer)) continue;
+					const topicLine = lines.find((l) => /·/.test(l)) || "";
+					const topic = topicLine.replace(/^·\s*/, "").slice(0, 80);
+					if (!/(19|20)\d{2}\s+[A-Za-z]/.test(topic)) continue;
+					const line = t.slice(0, 150);
+					if (out.some((o) => o.line === line)) continue;
+					out.push({ buyer, topic, line });
+					if (out.length >= 15) break;
+				}
+				return out;
+			}).catch(() => []);
+			for (const r of rows) {
+				try {
+					DataService.upsertThread({ accountId: account.id, buyer: r.buyer, topic: r.topic, lastMessage: r.line });
+				} catch (_e) {}
+			}
+		} catch (_e) {}
+	}
+
+	async _runChatMode(linkedAccounts) {
+		const pool = new Map();
+		try {
+			let cycles = 0;
+			while (!this.stopped) {
+				for (const account of linkedAccounts) {
+					if (this.stopped) break;
+					const displayName = account.fbName || account.name;
+					try {
+						const bot = await this._getPooledBot(pool, account);
+						this.logger.info(`[${displayName}] Memeriksa inbox...`);
+						await this._syncChatThreadList(bot, account); // daftar ikut segar tiap siklus
+						await bot.replyToChats({ pin: account.e2ee_pin });
+						// Follow-up sunyi 2 hari, maks 2 per thread
+						try {
+							const cands = DataService.getFollowupCandidates(account.id, 2, 2);
+							if (cands.length > 0) {
+								this.logger.info(`[${displayName}] Follow-up ${cands.length} thread sunyi...`);
+								const results = await bot.followUpThreads(account, cands, { pin: account.e2ee_pin });
+								for (const r of results) {
+									if (r.status !== "replied" || !r.key) continue;
+									try {
+										DataService.bumpFollowup(r.key);
+									} catch (_e) {}
+									try {
+										DataService.recordAutomationEvent({
+											actionType: "chat_followup",
+											runId: this.runId,
+											mode: "chat",
+											accountId: account.id,
+											result: "success",
+											message: `Follow-up ${r.buyer}: ${(r.reply || "").slice(0, 120)}`,
+										});
+									} catch (_e) {}
+								}
+							}
+						} catch (e) {
+							this.logger.warn(`Follow-up skip ${displayName}: ${e.message}`);
+						}
+					} catch (e) {
+						this.logger.error(`Error saat cek chat akun ${displayName}:`, e);
+						pool.delete(String(account.id));
+					}
+				}
+				if (this.stopped) break;
+				cycles++;
+				if (this.chatCycles > 0 && cycles >= this.chatCycles) {
+					this.logger.info(`Chat stop: batas ${this.chatCycles} siklus tercapai.`);
+					break;
+				}
+				this.logger.info(`Semua akun selesai diperiksa. Ulang dalam ${Math.round(this.chatIntervalMs / 1000)} detik...`);
+				await this._sleepInterruptible(this.chatIntervalMs);
+			}
+		} finally {
+			await this._closePool(pool);
+		}
+	}
+
 	async _runViralMode(activeListings, linkedAccounts) {
 		let startIndex = 0;
 		try {
@@ -609,7 +883,11 @@ class BotOrchestrator {
 			this.logger.warn(`Gagal baca checkpoint viral: ${e.message}`);
 		}
 
+		const pool = new Map();
+		try {
+
 		for (let i = startIndex; i < activeListings.length; i++) {
+			if (this.stopped) break;
 			const listing = activeListings[i];
 			this.logger.info(`=== [VIRAL SHARE] [${i+1}/${activeListings.length}] Listing: ${listing.title} ===`);
 			DataService.updateListingStatus(listing.id, "posting");
@@ -622,13 +900,8 @@ class BotOrchestrator {
 				const masterAccount = linkedAccounts[randomIndex];
 				this.logger.info(`Master URL belum ada. Akun [${masterAccount.fbName || masterAccount.name}] dipilih secara ACAK (random) sebagai Master Poster.`);
 				
-				const bot = new FacebookBot({
-					accountName: masterAccount.fbName || masterAccount.name,
-					userDataDir: path.isAbsolute(masterAccount.profile) ? masterAccount.profile : path.join(process.cwd(), masterAccount.profile)
-				});
-				
 				try {
-					await bot.init();
+					const bot = await this._getPooledBot(pool, masterAccount);
 					
 					const originalPhotos = listing.photos || [];
 					const photoUsage = listing.photoUsage || {};
@@ -655,8 +928,7 @@ class BotOrchestrator {
 					}
 				} catch (e) {
 					this.logger.error("Error pembuatan Master Post:", e);
-				} finally {
-					await bot.close();
+					pool.delete(String(masterAccount.id));
 				}
 			} else {
 				this.logger.info(`Menggunakan Master Post dari database: ${masterPostUrl}`);
@@ -665,23 +937,27 @@ class BotOrchestrator {
 			if (!masterPostUrl) {
 				this.logger.warn(`Skip mass-share untuk ${listing.title} karena Master Post tidak ada.`);
 				DataService.updateListingStatus(listing.id, "failed");
+				DataService.recordAutomationEvent({
+					actionType: "listing_error",
+					runId: this.runId,
+					mode: "viral",
+					listingId: listing.id,
+					result: "failed",
+					message: `Tidak ada post sumber untuk share: ${listing.title}`,
+				});
 				continue;
 			}
 
 			// 2. Mass Share using all accounts
 			for (const account of linkedAccounts) {
+				if (this.stopped) break;
 				if (!RateLimiter.canAct(account.id, "share")) {
 					this.logger.warn(`Akun [${account.fbName || account.name}] kehabisan budget 'share'. Skip.`);
 					continue;
 				}
 
-				const bot = new FacebookBot({
-					accountName: account.fbName || account.name,
-					userDataDir: path.isAbsolute(account.profile) ? account.profile : path.join(process.cwd(), account.profile)
-				});
-
 				try {
-					await bot.init();
+					const bot = await this._getPooledBot(pool, account);
 					const isRestricted = await this._shareToGroups(bot, account, listing, masterPostUrl);
 					if (isRestricted) {
 						this.logger.warn(`Akun [${account.fbName || account.name}] terkena limit. Stop share untuk akun ini.`);
@@ -690,8 +966,7 @@ class BotOrchestrator {
 					}
 				} catch (e) {
 					this.logger.error(`Error mass-share di akun [${account.fbName || account.name}]:`, e);
-				} finally {
-					await bot.close();
+					pool.delete(String(account.id));
 				}
 			}
 			
@@ -701,6 +976,9 @@ class BotOrchestrator {
 			try {
 				DataService.setAppConfig(`checkpoint_viral`, String(i + 1));
 			} catch (e) {}
+		}
+		} finally {
+			await this._closePool(pool);
 		}
 		
 		try {

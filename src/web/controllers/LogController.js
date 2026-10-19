@@ -5,6 +5,9 @@ const NotificationService = require("../../services/notificationService");
 class LogController {
 	static streamLogs(req, res) {
 		const mode = req.query.mode || "all";
+		if (!Object.keys(QueueService.getAllQueues()).includes(mode)) {
+			return res.status(400).json({ error: "Mode log tidak valid" });
+		}
 		const queue = QueueService.getQueue(mode);
 
 		res.setHeader("Content-Type", "text/event-stream");
@@ -160,6 +163,17 @@ class LogController {
 		try {
 			DataService.markAllNotificationsRead();
 			res.json({ success: true });
+		} catch (err) {
+			res.status(500).json({ error: err.message });
+		}
+	}
+
+	static async clearNotifications(req, res) {
+		try {
+			const result = req.query.readOnly === "true"
+				? DataService.clearReadNotifications()
+				: DataService.clearAllNotifications();
+			res.json({ success: true, deleted: result.changes });
 		} catch (err) {
 			res.status(500).json({ error: err.message });
 		}

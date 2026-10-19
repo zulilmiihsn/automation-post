@@ -2,11 +2,18 @@ const path = require("node:path");
 const DataService = require("../services/dataService");
 const BrowserManager = require("../../core/browserManager");
 
+/** Cegah dobel-klik / retry menumpuk: 1 akun = 1 sesi login/logout dalam 1 waktu. */
+const _accountBusy = new Set();
+
 class AccountController {
 	static async getAccounts(_req, res) {
 		try {
 			const data = await DataService.getAccounts();
-			res.json(data);
+			res.json(data.map((account) => {
+				const publicAccount = { ...account };
+				delete publicAccount.e2ee_pin;
+				return publicAccount;
+			}));
 		} catch (_err) {
 			res.status(500).json({ error: "Failed to load accounts" });
 		}
@@ -61,16 +68,24 @@ class AccountController {
 
 	static async loginAccount(req, res) {
 		const accountId = req.params.id;
-		try {
+		if (_accountBusy.has(accountId)) {
+			return res.status(409).json({ error: "Login akun ini sedang berjalan. Tunggu browser yang sudah terbuka, jangan klik berulang." });
+		}
+		_accountBusy.add(accountId);
+		const browser = await (async () => {
 			const accounts = await DataService.getAccounts();
 			const account = accounts.find((a) => a.id === accountId);
-
-			if (!account) return res.status(404).json({ error: "Account not found" });
-
-			const browser = new BrowserManager({
+			if (!account) return null;
+			return new BrowserManager({
 				accountName: account.fbName || account.name,
 				userDataDir: path.join(__dirname, "../../../", account.profile),
 			});
+		})();
+		if (!browser) {
+			_accountBusy.delete(accountId);
+			return res.status(404).json({ error: "Account not found" });
+		}
+		try {
 
 			await browser.init({ headless: false });
 			await browser.page.goto("https://www.facebook.com");
@@ -113,29 +128,35 @@ class AccountController {
 						acc.fbPic = localPicUrl;
 					}
 				});
-				await browser.close();
 				res.json({
 					success: true,
 					accountName: profileInfo?.name || result.name,
 				});
 			} else {
-				await browser.close();
 				throw new Error(result.error);
 			}
 		} catch (error) {
 			console.error("Failed to open browser:", error);
-			res.status(500).json({ error: error.message });
+			if (!res.headersSent) res.status(500).json({ error: error.message });
+		} finally {
+			await browser.close().catch(() => {});
+			_accountBusy.delete(accountId);
 		}
 	}
 
 	static async logoutAccount(req, res) {
 		const accountId = req.params.id;
+		if (_accountBusy.has(accountId)) {
+			return res.status(409).json({ error: "Akun ini sedang diproses. Tunggu sebentar." });
+		}
+		_accountBusy.add(accountId);
+		let browser = null;
 		try {
 			const accounts = await DataService.getAccounts();
 			const account = accounts.find((a) => a.id === accountId);
 			if (!account) return res.status(404).json({ error: "Account not found" });
 
-			const browser = new BrowserManager({
+			browser = new BrowserManager({
 				accountName: account.fbName || account.name,
 				userDataDir: path.join(__dirname, "../../../", account.profile),
 			});
@@ -152,11 +173,13 @@ class AccountController {
 			await DataService.updateAccount(accountId, (acc) => {
 				acc.linked = false;
 			});
-			await browser.close();
 
 			res.json({ success: true, message: "Logged out successfully" });
 		} catch (error) {
-			res.status(500).json({ error: error.message });
+			if (!res.headersSent) res.status(500).json({ error: error.message });
+		} finally {
+			if (browser) await browser.close().catch(() => {});
+			_accountBusy.delete(accountId);
 		}
 	}
 }

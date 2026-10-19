@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Bot, MessageCircle, Users, Brain, Search, Activity, Play, Square } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/ToastContext';
@@ -17,7 +17,7 @@ export default function AgentDashboard() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [s, inter, mem, accs] = await Promise.all([
@@ -35,11 +35,12 @@ export default function AgentDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    const task = window.setTimeout(fetchData, 0);
+    return () => window.clearTimeout(task);
+  }, [fetchData]);
 
   useEffect(() => {
     let es = null;
@@ -86,37 +87,6 @@ export default function AgentDashboard() {
     };
   }, []);
 
-  const handleStartChat = async () => {
-    if (!(await confirm("Jalankan otomatisasi Chat Auto-Reply sekarang?"))) return;
-    try {
-      const res = await fetch("/api/run-automation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: 'chat' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Gagal memulai chat");
-      toast.success("Chat Auto-Reply dijalankan");
-    } catch (err) {
-      toast.error("Error: " + err.message);
-    }
-  };
-
-  const handleStopChat = async () => {
-    if (!(await confirm("Hentikan bot Chat yang sedang berjalan?"))) return;
-    try {
-      await fetch("/api/stop-automation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: 'chat' }),
-      });
-      toast.success("Chat Auto-Reply dihentikan");
-    } catch (err) {
-      console.error(err);
-      toast.error("Gagal menghentikan bot chat: " + err.message);
-    }
-  };
-
   const handleStartAgent = async () => {
     if (!(await confirm("Jalankan AI Agent (like & comment feed otomatis)?"))) return;
     try {
@@ -139,7 +109,7 @@ export default function AgentDashboard() {
     }
   };
 
-  const searchMemories = async () => {
+  const searchMemories = useCallback(async () => {
     if (!memorySearch.trim()) {
       const mem = await api.getAgentMemories({ limit: 50 });
       setMemories(mem || []);
@@ -147,12 +117,12 @@ export default function AgentDashboard() {
     }
     const mem = await api.getAgentMemories({ search: memorySearch, limit: 50 });
     setMemories(mem || []);
-  };
+  }, [memorySearch]);
 
   useEffect(() => {
     const timer = setTimeout(searchMemories, 300);
     return () => clearTimeout(timer);
-  }, [memorySearch]);
+  }, [searchMemories]);
 
   const statCards = stats ? [
     { label: 'Total Interaksi', value: stats.total_interactions || 0, icon: Activity, color: '#818cf8' },

@@ -27,25 +27,32 @@ class AnalyticsController {
 		}
 	}
 
+	static async getDailyReportDetails(req, res) {
+		try {
+			const reportDate = String(req.params.date || '');
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate) || Number.isNaN(Date.parse(`${reportDate}T00:00:00Z`))) {
+				return res.status(400).json({ error: "Tanggal laporan tidak valid" });
+			}
+			res.json(DataService.getDailyReportDetails(reportDate));
+		} catch (err) {
+			res.status(500).json({ error: err.message });
+		}
+	}
+
 	static async generateReport(_req, res) {
 		try {
 			const today = new Date().toISOString().split('T')[0];
-			const activity = DataService.getLogActivityByDay(1);
-			const counts = { posts: 0, likes: 0, comments: 0, shares: 0, chats: 0, errors: 0 };
-
-			const logs = DataService.getLogs ? DataService.getLogs({ limit: 1000 }) : [];
-			for (const log of logs) {
-				const msg = (log.message || '').toLowerCase();
-				if (msg.includes('posting') || msg.includes('post')) counts.posts++;
-				if (msg.includes('like')) counts.likes++;
-				if (msg.includes('comment') || msg.includes('komentar')) counts.comments++;
-				if (msg.includes('share') || msg.includes('bagikan')) counts.shares++;
-				if (msg.includes('chat') || msg.includes('reply')) counts.chats++;
-				if (log.level === 'ERROR') counts.errors++;
-			}
-
-			const totalActions = counts.posts + counts.likes + counts.comments + counts.shares + counts.chats;
-			const summary = `Posts: ${counts.posts}, Likes: ${counts.likes}, Comments: ${counts.comments}, Shares: ${counts.shares}, Chats: ${counts.chats}, Errors: ${counts.errors}`;
+			const details = DataService.getDailyReportDetails(today);
+			const counts = {
+				posts: details.summary.posts,
+				shares: details.summary.shares,
+				comments: 0,
+				likes: 0,
+				chats: 0,
+				errors: details.summary.errorCount,
+			};
+			const totalActions = details.summary.actions;
+			const summary = `Marketplace: ${counts.posts}, Feed: ${details.summary.feedPosts}, Share grup: ${counts.shares}, Aksi gagal: ${counts.errors}`;
 
 			DataService.upsertDailyReport(today, {
 				posts_created: counts.posts,

@@ -1,42 +1,97 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, Users, Package, Check, X, Layers, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Save, Users, Check, X, Layers } from 'lucide-react';
 import { api } from '../services/api';
 import ListingsEdit from './ListingsEdit';
 import { useToast } from '../components/ToastContext';
 import { useConfirm } from '../components/ConfirmContext';
+import ListingThumb from '../components/ListingThumb';
+
+const formatRupiah = (val) => {
+  if (!val && val !== 0) return '';
+  const number = typeof val === 'string' ? val.replace(/[^0-9]/g, '') : val;
+  if (number === '') return '';
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(Number(number));
+};
 
 const MODAL_OVERLAY = {
   position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-  background: 'rgba(9, 9, 11, 0.85)', backdropFilter: 'blur(8px)',
+  background: 'var(--scrim)', backdropFilter: 'blur(8px)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
   padding: '20px'
 };
 
 const MODAL_CONTENT = {
-  background: '#121214', border: '1px solid #27272A', borderRadius: '24px',
-  width: '100%', maxWidth: '720px', maxHeight: '90vh', overflowY: 'auto',
+  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '24px',
+  width: '100%', maxWidth: '1440px', height: '92vh', overflow: 'hidden',
   display: 'flex', flexDirection: 'column', boxShadow: '0 32px 64px rgba(0,0,0,0.5)',
 };
 
 const INPUT_PREMIUM = {
-  background: '#18181B', border: '1px solid #3F3F46', borderRadius: '12px',
-  color: '#FAFAFA', padding: '16px 20px', fontSize: '15px', width: '100%', 
+  background: 'var(--card-hover)', border: '1px solid var(--border-light)', borderRadius: '10px',
+  color: 'var(--text)', padding: '10px 14px', fontSize: '14px', width: '100%',
   outline: 'none', transition: 'border 0.2s',
-  fontFamily: 'inherit'
+  fontFamily: 'inherit', lineHeight: 1.4
 };
 
 const SELECTION_LIST = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px',
-  maxHeight: '220px', overflowY: 'auto', paddingRight: '8px',
+  gridAutoRows: 'min-content', alignContent: 'start',
+  flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingRight: '8px',
 };
+
+const PRODUCT_GRID = {
+  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))', gap: '12px',
+  gridAutoRows: 'min-content', alignContent: 'start',
+  flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingRight: '8px',
+};
+
+const ProductCard = ({ selected, item, onClick }) => (
+  <div
+    onClick={onClick}
+    title={item.title}
+    style={{
+      background: selected ? 'rgba(16, 185, 129, 0.08)' : 'var(--card-hover)',
+      border: `1px solid ${selected ? 'rgba(16, 185, 129, 0.35)' : 'var(--border)'}`,
+      borderRadius: '12px', cursor: 'pointer', overflow: 'hidden',
+      transition: 'all 0.15s ease', display: 'flex', flexDirection: 'column',
+    }}
+    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
+    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+  >
+    <div style={{ position: 'relative', height: 120, background: 'var(--bg)' }}>
+      <ListingThumb photos={item.photos} title={item.title} compact />
+      <div style={{
+        position: 'absolute', top: 8, left: 8, width: 22, height: 22, borderRadius: 6,
+        border: `2px solid ${selected ? 'var(--success)' : 'var(--border-light)'}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: selected ? 'var(--success)' : 'var(--scrim)', transition: 'all 0.2s',
+      }}>
+        {selected && <Check size={14} color="var(--success-contrast)" strokeWidth={3} />}
+      </div>
+    </div>
+    <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{
+        fontSize: 12, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3,
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        overflow: 'hidden', minHeight: 31,
+      }}>
+        {item.title || `Produk #${item.id}`}
+      </span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)' }}>
+        {formatRupiah(item.price) || '—'}
+      </span>
+    </div>
+  </div>
+);
 
 const SelectionItem = ({ selected, label, onClick, icon: Icon }) => (
   <div 
     onClick={onClick}
     style={{
       display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px',
-      background: selected ? 'rgba(16, 185, 129, 0.08)' : '#18181B',
-      border: `1px solid ${selected ? 'rgba(16, 185, 129, 0.3)' : '#27272A'}`,
+      background: selected ? 'rgba(16, 185, 129, 0.08)' : 'var(--card-hover)',
+      border: `1px solid ${selected ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}`,
       borderRadius: '12px', cursor: 'pointer', transition: 'all 0.15s ease',
     }}
     onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
@@ -45,32 +100,35 @@ const SelectionItem = ({ selected, label, onClick, icon: Icon }) => (
   >
     <div style={{
       width: '22px', height: '22px', borderRadius: '6px', 
-      border: `2px solid ${selected ? '#10B981' : '#52525B'}`,
+      border: `2px solid ${selected ? 'var(--success)' : 'var(--border-light)'}`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: selected ? '#10B981' : 'transparent', transition: 'all 0.2s'
+      background: selected ? 'var(--success)' : 'transparent', transition: 'all 0.2s'
     }}>
-      {selected && <Check size={14} color="#000" strokeWidth={3} />}
+      {selected && <Check size={14} color="var(--success-contrast)" strokeWidth={3} />}
     </div>
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, overflow: 'hidden' }}>
-      {Icon && <Icon size={18} color={selected ? '#10B981' : '#A1A1AA'} />}
-      <span style={{ fontSize: '14px', fontWeight: 500, color: selected ? '#FFF' : '#D4D4D8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      {Icon && <Icon size={18} color={selected ? 'var(--success)' : 'var(--text-muted)'} />}
+      <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {label}
       </span>
     </div>
   </div>
 );
 
-export default function Groups({ 
-  selectedGroupId = null, 
-  onSelectGroup, 
-  onOpenGroupListings, 
-  onRefresh 
+export default function Groups({
+  selectedGroupId = null,
+  onSelectGroup,
+  onOpenWorkspace,
+  onRefresh
 }) {
   const [groups, setGroups] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [listings, setListings] = useState([]);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroup, setNewGroup] = useState({ name: '', accounts: [], listings: [] });
+  const [qAcc, setQAcc] = useState('');
+  const [qProd, setQProd] = useState('');
+  const [openId, setOpenId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingListingForGroup, setEditingListingForGroup] = useState(null);
   const toast = useToast();
@@ -94,6 +152,7 @@ export default function Groups({
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []);
 
@@ -109,15 +168,15 @@ export default function Groups({
       setShowAddGroup(false);
       await fetchData();
       if (onRefresh) onRefresh();
-      toast.success('Grup berhasil disimpan');
+      toast.success('Workspace tersimpan');
     } catch (err) {
       console.error('Save group error:', err);
-      toast.error('Gagal menyimpan grup: ' + err.message);
+      toast.error('Gagal simpan workspace: ' + err.message);
     }
   };
 
   const deleteGroup = async (id) => {
-    if (!(await confirm('Apakah Anda yakin ingin menghapus grup ini?'))) return;
+    if (!(await confirm('Hapus workspace ini? Produk dan akun tidak ikut terhapus.'))) return;
     try {
       await api.deleteGroup(id);
       setGroups(prev => prev.filter(g => g.id !== id));
@@ -125,10 +184,10 @@ export default function Groups({
         onSelectGroup(null);
       }
       if (onRefresh) onRefresh();
-      toast.success('Grup dihapus');
+      toast.success('Workspace dihapus');
     } catch (err) {
       console.error('Delete group error:', err);
-      toast.error('Gagal menghapus grup');
+      toast.error('Gagal hapus workspace');
     }
   };
 
@@ -164,7 +223,7 @@ export default function Groups({
           if (saved && saved.id) {
             try {
               await api.addGroupListing(editingListingForGroup, saved.id);
-            } catch (_) {}
+            } catch { /* ignore */ }
           }
           setEditingListingForGroup(null);
           await fetchData();
@@ -175,25 +234,17 @@ export default function Groups({
   }
 
   return (
-    <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
       {/* Header Info */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#FAFAFA', margin: 0 }}>
-            Manajemen Grup / Workspace
-          </h2>
-          <p style={{ color: '#A1A1AA', fontSize: '14px', margin: '6px 0 0 0' }}>
-            Atur toko atau kampanye berbeda. Kelola akun FB dan daftar produk yang ditugaskan ke setiap grup.
-          </p>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <button 
           onClick={() => {
             setNewGroup({ name: '', accounts: [], listings: [] });
             setShowAddGroup(true);
           }}
           style={{
-            padding: '12px 24px', background: '#FAFAFA', color: '#09090B',
+            padding: '12px 24px', background: 'var(--primary)', color: 'var(--primary-contrast)',
             border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s'
           }}
@@ -202,33 +253,33 @@ export default function Groups({
           onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
           onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
         >
-          <Plus size={18} strokeWidth={2.5} /> Buat Grup Baru
+          <Plus size={18} strokeWidth={2.5} /> Workspace Baru
         </button>
       </div>
 
       {/* Group List Grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#71717A' }}>Memuat data grup...</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Memuat...</div>
         ) : groups.length === 0 ? (
           <div style={{ 
-            background: '#121214', border: '1px dashed #27272A', borderRadius: '24px', 
+            background: 'var(--card)', border: '1px dashed var(--border)', borderRadius: '24px',
             padding: '64px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center'
           }}>
-            <Layers size={48} color="#52525B" strokeWidth={1.5} style={{ marginBottom: '16px' }} />
-            <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#FAFAFA', margin: '0 0 6px 0' }}>Belum ada grup kampanye</h3>
-            <p style={{ color: '#A1A1AA', fontSize: '14px', maxWidth: '420px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
-              Buat grup untuk memisahkan akun dan produk per toko/proyek jualan Anda.
+            <Layers size={48} color="var(--text-muted)" strokeWidth={1.5} style={{ marginBottom: '16px' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', margin: '0 0 6px 0' }}>Belum ada workspace</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '14px', maxWidth: '420px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+              Buat workspace untuk memisahkan akun dan produk per toko.
             </p>
             <button 
               onClick={() => setShowAddGroup(true)}
               style={{
-                padding: '10px 20px', background: '#10B981', color: '#09090B',
+                padding: '10px 20px', background: 'var(--success)', color: 'var(--success-contrast)',
                 border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 600,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
               }}
             >
-              <Plus size={16} /> Buat Grup Pertama
+              <Plus size={16} /> Buat Workspace
             </button>
           </div>
         ) : (
@@ -236,266 +287,103 @@ export default function Groups({
             const isCurrentActive = selectedGroupId === g.id;
             const groupAccounts = accounts.filter(a => g.accounts.includes(a.id));
             const groupListings = listings.filter(l => g.listings.includes(l.id));
-            const mpReadyCount = groupListings.filter(l => l.postMarketplace !== false && l.isActive !== false).length;
-            const viralReadyCount = groupListings.filter(l => l.autoFeed === true && l.isActive !== false).length;
             const activeAccsCount = groupAccounts.filter(a => a.isActive && a.linked).length;
 
             return (
               <div key={g.id} style={{
-                background: '#121214', 
-                border: isCurrentActive ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #27272A', 
-                borderRadius: '24px',
-                padding: '32px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: '28px',
-                position: 'relative',
-                boxShadow: isCurrentActive ? '0 0 30px rgba(16, 185, 129, 0.08)' : 'none'
+                background: 'var(--card)',
+                border: isCurrentActive ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid var(--border)',
+                borderRadius: '16px',
+                padding: '12px 16px',
               }}>
-                {/* Card Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{ 
-                      background: isCurrentActive ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.05)', 
-                      padding: '12px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                    }}>
-                      <Layers size={26} color={isCurrentActive ? '#10B981' : '#FAFAFA'} />
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <h3 style={{ fontSize: '22px', fontWeight: 600, color: '#FAFAFA', margin: 0 }}>
-                          {g.name}
-                        </h3>
-                        {isCurrentActive && (
-                          <span style={{
-                            padding: '4px 10px', background: 'rgba(16, 185, 129, 0.15)',
-                            border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '100px',
-                            color: '#10B981', fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em'
-                          }}>
-                            WORKSPACE AKTIF
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '13px', color: '#71717A', marginTop: '4px' }}>
-                        {g.accounts.length} Akun Tertaut &bull; {g.listings.length} Produk Tertaut
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions Top Right */}
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    {!isCurrentActive ? (
-                      <button 
-                        onClick={() => {
-                          if (onSelectGroup) onSelectGroup(g.id);
-                          toast.success(`Workspace aktif dialihkan ke "${g.name}"`);
-                        }}
-                        style={{
-                          padding: '8px 16px', background: 'rgba(255,255,255,0.06)', color: '#FAFAFA', 
-                          border: '1px solid #3F3F46', borderRadius: '10px', fontSize: '13px', fontWeight: 600,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.15s'
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
-                      >
-                        <Check size={15} /> Jadikan Workspace Aktif
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => {
-                          if (onSelectGroup) onSelectGroup(null);
-                        }}
-                        style={{
-                          padding: '8px 14px', background: 'transparent', color: '#A1A1AA', 
-                          border: '1px solid #27272A', borderRadius: '10px', fontSize: '12px',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                      >
-                        <X size={14} /> Keluar Fokus
-                      </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setOpenId(openId === g.id ? null : g.id)}
+                    aria-expanded={openId === g.id}
+                    aria-label={openId === g.id ? `Tutup isi ${g.name}` : `Lihat isi ${g.name}`}
+                    title="Lihat isi"
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'inline-flex' }}
+                  >
+                    <span style={{ display: 'inline-block', transform: openId === g.id ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', fontSize: 14 }}>▶</span>
+                  </button>
+                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {g.name}
+                    </h3>
+                    {isCurrentActive && (
+                      <span style={{ padding: '2px 8px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '100px', color: 'var(--success)', fontSize: '10px', fontWeight: 700 }}>
+                        DIPAKAI
+                      </span>
                     )}
-
-                    <button 
-                      onClick={() => onOpenGroupListings && onOpenGroupListings(g.id)}
-                      style={{
-                        padding: '8px 18px', background: '#10B981', color: '#09090B', 
-                        border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 600,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.15s'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-                      onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                      onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
-                      onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
-                    >
-                      <Package size={16} strokeWidth={2.5} /> Buka di Tab Listing ({g.listings.length})
-                    </button>
-
-                    <div style={{ width: '1px', height: '24px', background: '#27272A', margin: '0 4px' }} />
-
-                    <button onClick={() => {
-                      setNewGroup({ ...g });
-                      setShowAddGroup(true);
-                    }} style={{
-                      padding: '8px', background: 'rgba(255,255,255,0.03)', color: '#A1A1AA', border: '1px solid #3F3F46', 
-                      borderRadius: '10px', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.color = '#FAFAFA'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = '#A1A1AA'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                    title="Edit Nama / Anggota Grup"
-                    >
-                      <Edit2 size={16}/>
-                    </button>
-                    <button onClick={() => deleteGroup(g.id)} style={{
-                      padding: '8px', background: 'rgba(255,255,255,0.03)', color: '#A1A1AA', border: '1px solid #3F3F46', 
-                      borderRadius: '10px', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.color = '#EF4444'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)'; e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = '#A1A1AA'; e.currentTarget.style.borderColor = '#3F3F46'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                    title="Hapus Grup"
-                    >
-                      <Trash2 size={16}/>
-                    </button>
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {g.accounts.length} akun &bull; {g.listings.length} produk &bull;{' '}
+                    {activeAccsCount > 0 && groupListings.length > 0 ? (
+                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>Siap jalan ✓</span>
+                    ) : (
+                      <span>Belum siap: tambah {activeAccsCount === 0 ? 'akun' : ''}{activeAccsCount === 0 && groupListings.length === 0 ? ' + ' : ''}{groupListings.length === 0 ? 'produk' : ''}</span>
+                    )}
                   </div>
                 </div>
-                
-                {/* Card Body - 2 Columns Bento */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '32px', alignItems: 'start' }}>
-                  
-                  {/* Left: Accounts & Listings Member Pills */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
-                    {/* Accounts */}
-                    <div style={{ background: '#0D0D0F', border: '1px solid #1E1E22', borderRadius: '16px', padding: '18px 20px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Users size={14} color="#10B981" /> Akun Facebook ({g.accounts.length})
-                        </div>
-                        <button 
-                          onClick={() => {
-                            setNewGroup({ ...g });
-                            setShowAddGroup(true);
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: '#10B981', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                        >
-                          + Atur Akun
-                        </button>
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {g.accounts.length > 0 ? g.accounts.map(accId => {
-                          const acc = accounts.find(a => a.id === accId);
-                          const accName = acc?.fbName || acc?.name || accId;
-                          const isReady = acc?.isActive && acc?.linked;
-                          return (
-                            <div key={accId} style={{ 
-                              background: '#18181B', border: `1px solid ${isReady ? 'rgba(16, 185, 129, 0.25)' : '#27272A'}`, 
-                              borderRadius: '100px', padding: '6px 14px', fontSize: '13px', fontWeight: 500,
-                              color: '#FAFAFA', display: 'flex', alignItems: 'center', gap: '6px'
-                            }}>
-                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isReady ? '#10B981' : '#EF4444' }} />
-                              {accName}
-                            </div>
-                          );
-                        }) : <span style={{ color: '#52525B', fontSize: '13px', fontStyle: 'italic' }}>Belum ada akun ditugaskan</span>}
-                      </div>
-                    </div>
-
-                    {/* Listings */}
-                    <div style={{ background: '#0D0D0F', border: '1px solid #1E1E22', borderRadius: '16px', padding: '18px 20px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Package size={14} color="#3B82F6" /> Produk / Listing ({g.listings.length})
-                        </div>
-                        <div style={{ display: 'flex', gap: '10px' }}>
-                          <button 
-                            onClick={() => setEditingListingForGroup(g.id)}
-                            style={{ background: 'transparent', border: 'none', color: '#10B981', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                          >
-                            + Tambah Manual
-                          </button>
-                          <button 
-                            onClick={() => onOpenGroupListings && onOpenGroupListings(g.id)}
-                            style={{ background: 'transparent', border: 'none', color: '#3B82F6', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                          >
-                            Pilih dari Katalog &rarr;
-                          </button>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {g.listings.length > 0 ? (
-                          <>
-                            {g.listings.slice(0, 10).map(lId => {
-                              const lTitle = listings.find(l => l.id === lId)?.title || lId;
-                              return (
-                                <div key={lId} style={{ 
-                                  background: '#18181B', border: '1px solid #27272A', 
-                                  borderRadius: '100px', padding: '6px 14px', fontSize: '13px', fontWeight: 500,
-                                  color: '#E4E4E7'
-                                }}>
-                                  {lTitle}
-                                </div>
-                              );
-                            })}
-                            {g.listings.length > 10 && (
-                              <div 
-                                onClick={() => onOpenGroupListings && onOpenGroupListings(g.id)}
-                                style={{ 
-                                  background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', 
-                                  borderRadius: '100px', padding: '6px 14px', fontSize: '13px', fontWeight: 600,
-                                  color: '#10B981', cursor: 'pointer'
-                                }}
-                              >
-                                +{g.listings.length - 10} lainnya &rarr;
-                              </div>
-                            )}
-                          </>
-                        ) : <span style={{ color: '#52525B', fontSize: '13px', fontStyle: 'italic' }}>Belum ada produk ditugaskan</span>}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Right: Quick Readiness Stats & Action Guide */}
-                  <div style={{ 
-                    background: '#09090B', border: '1px solid #27272A', borderRadius: '18px', 
-                    padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' 
-                  }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Kesiapan Otomasi Grup
-                    </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
-                      <div style={{ background: '#121214', border: '1px solid #27272A', borderRadius: '12px', padding: '12px 14px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color: '#FAFAFA' }}>{mpReadyCount}</div>
-                        <div style={{ fontSize: '11px', color: '#71717A', marginTop: '2px' }}>MP Siap</div>
-                      </div>
-                      <div style={{ background: '#121214', border: '1px solid #27272A', borderRadius: '12px', padding: '12px 14px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color: '#FAFAFA' }}>{viralReadyCount}</div>
-                        <div style={{ fontSize: '11px', color: '#71717A', marginTop: '2px' }}>Viral Siap</div>
-                      </div>
-                      <div style={{ background: '#121214', border: '1px solid #27272A', borderRadius: '12px', padding: '12px 14px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color: activeAccsCount > 0 ? '#10B981' : '#EF4444' }}>{activeAccsCount}</div>
-                        <div style={{ fontSize: '11px', color: '#71717A', marginTop: '2px' }}>Akun Siap</div>
-                      </div>
-                    </div>
-
-                    <p style={{ fontSize: '12px', color: '#71717A', margin: '4px 0 0 0', lineHeight: 1.5 }}>
-                      Untuk menjalankan posting Marketplace, sundul otomatis, atau viral share khusus grup ini, buka tab Listings.
-                    </p>
-
-                    <button 
-                      onClick={() => onOpenGroupListings && onOpenGroupListings(g.id)}
-                      style={{
-                        padding: '12px 16px', background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', 
-                        border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '12px', fontSize: '13px', fontWeight: 600,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                        transition: 'all 0.15s', marginTop: 'auto'
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.2)'; e.currentTarget.style.borderColor = '#10B981'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.1)'; e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.3)'; }}
-                    >
-                      <span>Buka Tab Listing & Jalankan Bot</span> &rarr;
-                    </button>
-                  </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => onOpenWorkspace && onOpenWorkspace(g.id)}
+                    style={{ padding: '7px 14px', minHeight: '38px', background: 'var(--success)', color: 'var(--success-contrast)', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Buka
+                  </button>
+                  <button
+                    onClick={() => { setNewGroup({ ...g }); setShowAddGroup(true); }}
+                    style={{ padding: '7px 14px', minHeight: '38px', background: 'transparent', color: 'var(--text)', border: '1px solid var(--border-light)', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Ubah
+                  </button>
+                  <button
+                    onClick={() => deleteGroup(g.id)}
+                    aria-label={'Hapus workspace ' + g.name}
+                    title="Hapus workspace"
+                    style={{ padding: '7px 11px', minHeight: '38px', background: 'transparent', color: '#EF4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Trash2 size={14} /> Hapus
+                  </button>
                 </div>
+                </div>
+                {openId === g.id && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(0, 2.5fr)', gap: '24px', marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        AKUN ({groupAccounts.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
+                        {groupAccounts.length === 0 && (
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Belum ada akun.</span>
+                        )}
+                        {groupAccounts.map((a) => (
+                          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', flexShrink: 0 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: a.isActive && a.linked ? 'var(--success)' : 'var(--text-muted)', flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.fbName || a.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        PRODUK ({groupListings.length})
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '4px 24px', maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
+                        {groupListings.length === 0 && (
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Belum ada produk.</span>
+                        )}
+                        {groupListings.map((l) => (
+                          <div key={l.id} style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            {l.title}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })
@@ -506,24 +394,24 @@ export default function Groups({
       {showAddGroup && (
         <div style={MODAL_OVERLAY} onClick={() => setShowAddGroup(false)}>
           <div style={MODAL_CONTENT} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: '24px 32px', borderBottom: '1px solid #27272A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ fontSize: '20px', fontWeight: 600, color: '#FAFAFA', margin: 0 }}>
-                  {newGroup.id ? 'Edit Grup / Workspace' : 'Buat Grup / Workspace Baru'}
+                <h3 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text)', margin: 0 }}>
+                  {newGroup.id ? 'Edit Workspace' : 'Workspace Baru'}
                 </h3>
-                <p style={{ color: '#A1A1AA', fontSize: '13px', margin: '4px 0 0 0' }}>
-                  Tentukan nama grup dan pilih akun Facebook serta produk yang ditugaskan.
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                  Beri nama, lalu centang akun + produk.
                 </p>
               </div>
-              <button onClick={() => setShowAddGroup(false)} style={{ background: 'transparent', border: 'none', color: '#A1A1AA', cursor: 'pointer' }}>
+              <button onClick={() => setShowAddGroup(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
 
-            <div style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '24px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#FAFAFA', marginBottom: '8px' }}>
-                  Nama Grup / Toko
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
+                  Nama workspace
                 </label>
                 <input 
                   type="text" 
@@ -534,25 +422,36 @@ export default function Groups({
                 />
               </div>
 
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: '#FAFAFA' }}>
-                    Pilih Akun Facebook ({newGroup.accounts?.length || 0} Terpilih)
+              <div style={{ display: 'flex', gap: '28px', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
+              <div style={{ flex: '1 1 380px', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                    Langkah 1 — Pilih akun ({newGroup.accounts?.length || 0})
                   </label>
-                  <button 
+                  <button
                     onClick={() => {
                       const allIds = accounts.map(a => a.id);
                       const isAll = newGroup.accounts?.length === allIds.length;
                       setNewGroup({ ...newGroup, accounts: isAll ? [] : allIds });
                     }}
-                    style={{ background: 'transparent', border: 'none', color: '#10B981', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--success)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
                   >
-                    {newGroup.accounts?.length === accounts.length ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                    {newGroup.accounts?.length === accounts.length ? 'Kosongkan' : 'Pilih semua'}
                   </button>
                 </div>
+                <input
+                  type="search"
+                  value={qAcc}
+                  onChange={(e) => setQAcc(e.target.value)}
+                  placeholder="Cari nama akun..."
+                  aria-label="Cari akun"
+                  style={{ ...INPUT_PREMIUM, padding: '10px 14px', fontSize: '13px', marginBottom: '10px' }}
+                />
                 <div style={SELECTION_LIST}>
-                  {accounts.map(acc => (
-                    <SelectionItem 
+                  {accounts
+                    .filter((acc) => `${acc.fbName || ''} ${acc.name || ''} ${acc.id}`.toLowerCase().includes(qAcc.trim().toLowerCase()))
+                    .map(acc => (
+                    <SelectionItem
                       key={acc.id}
                       selected={newGroup.accounts?.includes(acc.id)}
                       label={acc.fbName || acc.name || acc.id}
@@ -563,42 +462,52 @@ export default function Groups({
                 </div>
               </div>
 
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: '#FAFAFA' }}>
-                    Pilih Produk / Listing ({newGroup.listings?.length || 0} Terpilih)
+              <div style={{ flex: '1 1 380px', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                    Langkah 2 — Pilih produk ({newGroup.listings?.length || 0})
                   </label>
-                  <button 
+                  <button
                     onClick={() => {
                       const allIds = listings.map(l => l.id);
                       const isAll = newGroup.listings?.length === allIds.length;
                       setNewGroup({ ...newGroup, listings: isAll ? [] : allIds });
                     }}
-                    style={{ background: 'transparent', border: 'none', color: '#10B981', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--success)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
                   >
-                    {newGroup.listings?.length === listings.length ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                    {newGroup.listings?.length === listings.length ? 'Kosongkan' : 'Pilih semua'}
                   </button>
                 </div>
-                <div style={SELECTION_LIST}>
-                  {listings.map(l => (
-                    <SelectionItem 
+                <input
+                  type="search"
+                  value={qProd}
+                  onChange={(e) => setQProd(e.target.value)}
+                  placeholder="Cari judul produk..."
+                  aria-label="Cari produk"
+                  style={{ ...INPUT_PREMIUM, padding: '10px 14px', fontSize: '13px', marginBottom: '10px' }}
+                />
+                <div style={PRODUCT_GRID}>
+                  {listings
+                    .filter((l) => `${l.title || ''}`.toLowerCase().includes(qProd.trim().toLowerCase()))
+                    .map(l => (
+                    <ProductCard
                       key={l.id}
                       selected={newGroup.listings?.includes(l.id)}
-                      label={l.title || `Produk #${l.id}`}
-                      icon={Package}
+                      item={l}
                       onClick={() => toggleListing(l.id)}
                     />
                   ))}
                 </div>
               </div>
+              </div>
             </div>
 
-            <div style={{ padding: '24px 32px', borderTop: '1px solid #27272A', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <div style={{ padding: '24px 32px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
                 onClick={() => setShowAddGroup(false)}
                 style={{
-                  padding: '12px 20px', background: 'transparent', color: '#A1A1AA',
-                  border: '1px solid #3F3F46', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
+                  padding: '12px 20px', background: 'transparent', color: 'var(--text-muted)',
+                  border: '1px solid var(--border-light)', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
                   cursor: 'pointer'
                 }}
               >
@@ -607,12 +516,12 @@ export default function Groups({
               <button 
                 onClick={saveGroup}
                 style={{
-                  padding: '12px 24px', background: '#10B981', color: '#09090B',
+                  padding: '12px 24px', background: 'var(--success)', color: 'var(--success-contrast)',
                   border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
                 }}
               >
-                <Save size={16} /> Simpan Grup
+                  <Save size={16} /> Simpan
               </button>
             </div>
           </div>

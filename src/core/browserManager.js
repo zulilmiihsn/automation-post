@@ -1,9 +1,23 @@
 const { chromium } = require("playwright-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const path = require("node:path");
+const fs = require("node:fs");
 const Logger = require("../utils/logger");
 
 chromium.use(StealthPlugin());
+
+/** Profil Chromium hanya boleh dipakai 1 proses dalam 1 waktu. */
+const _launchingProfiles = new Set();
+const _openProfiles = new Set();
+
+/** Hapus sisa lock crash sebelumnya (bukan lock yang sedang dipegang proses hidup). */
+function _clearStaleProfileLock(userDataDir) {
+	for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie", "DevToolsActivePort"]) {
+		try {
+			fs.rmSync(path.join(userDataDir, name), { force: true });
+		} catch (_) {}
+	}
+}
 
 /** Anti-detection: random viewport per session */
 const _randomViewport = () => ({
@@ -39,7 +53,13 @@ class BrowserManager {
 	async init(options = {}) {
 		const { headless = false, remotePort = 0 } = options;
 
+		if (_launchingProfiles.has(this.userDataDir) || _openProfiles.has(this.userDataDir)) {
+			throw new Error(`Profil ${this.userDataDir} sedang dipakai proses lain. Tunggu browser sebelumnya selesai/tertutup dulu.`);
+		}
+		_launchingProfiles.add(this.userDataDir);
+
 		try {
+			_clearStaleProfileLock(this.userDataDir);
 			this.logger.info(`Meluncurkan browser dengan profil: ${this.userDataDir} (viewport: ${this.viewport.width}x${this.viewport.height})`);
 
 			this.context = await chromium.launchPersistentContext(this.userDataDir, {
@@ -116,10 +136,14 @@ class BrowserManager {
 			});
 
 			this.logger.success("Browser berhasil diinisialisasi.");
+			_openProfiles.add(this.userDataDir);
 			return this.page;
 		} catch (err) {
 			this.logger.error("Gagal menginisialisasi browser", err);
+			await this.close().catch(() => {});
 			throw err;
+		} finally {
+			_launchingProfiles.delete(this.userDataDir);
 		}
 	}
 
@@ -129,8 +153,9 @@ class BrowserManager {
 			for (const p of pages) {
 				await p.close().catch(() => {});
 			}
-			await this.context.close();
+			await this.context.close().catch(() => {});
 		}
+		_openProfiles.delete(this.userDataDir);
 		this.page = null;
 		this.context = null;
 	}

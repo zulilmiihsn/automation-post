@@ -17,7 +17,9 @@ const orchestrator = new BotOrchestrator(RUN_MODE, ACCOUNT_ID, COMMENT_TARGET_UR
 async function gracefulShutdown(signal) {
 	console.log(`\n[SYSTEM] Menerima sinyal ${signal}. Menutup browser secara aman...`);
 	try {
-		if (orchestrator && orchestrator.bot) {
+		if (orchestrator && typeof orchestrator.requestStop === "function") {
+			await orchestrator.requestStop();
+		} else if (orchestrator && orchestrator.bot) {
 			await orchestrator.bot.close();
 		}
 	} catch (e) {

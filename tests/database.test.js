@@ -85,5 +85,65 @@ describe('DataService (SQLite)', () => {
 
         DataService.deleteGroup(groupId);
     });
-});
 
+    test('structured automation events appear in daily report details', () => {
+        const reportDate = new Date().toISOString().slice(0, 10);
+        const runId = `test-run-${Date.now()}`;
+        DataService.startAutomationRun({ runId, mode: 'marketplace' });
+        DataService.updateAutomationRunScope(runId, { accountsCount: 2, listingsCount: 3 });
+        const eventId = DataService.recordAutomationEvent({
+            actionType: 'marketplace_post',
+            runId,
+            mode: 'marketplace',
+            accountId: 'test-account',
+            listingId: 987654321,
+            result: 'success',
+            message: 'Test post succeeded',
+            metadata: { listingTitle: 'Test listing' },
+        });
+        const failedEventId = DataService.recordAutomationEvent({
+            actionType: 'listing_error',
+            runId,
+            mode: 'marketplace',
+            accountId: 'test-account',
+            listingId: 987654321,
+            result: 'failed',
+            message: 'Test listing failed',
+        });
+        DataService.finishAutomationRun({ runId, status: 'completed', durationMs: 12500 });
+
+        try {
+            const detail = DataService.getDailyReportDetails(reportDate);
+            expect(detail.events.some(event => event.id === eventId && event.action_type === 'marketplace_post')).toBe(true);
+            expect(detail.summary.errorCount).toBeGreaterThanOrEqual(1);
+            expect(detail.runs.some(run => run.run_id === runId && run.status === 'completed')).toBe(true);
+            expect(detail.runs.find(run => run.run_id === runId).duration_ms).toBe(12500);
+            const report = DataService.getDailyReports(30).find(row => row.report_date === reportDate);
+            expect(report.actual_posts).toBeGreaterThanOrEqual(1);
+            expect(report.actual_actions).toBeGreaterThanOrEqual(1);
+            expect(report.actual_errors).toBeGreaterThanOrEqual(1);
+            expect(report.actual_runs).toBeGreaterThanOrEqual(1);
+            expect(report.duration_ms).toBeGreaterThanOrEqual(12500);
+        } finally {
+            const testDb = new Database(TEST_DB_PATH);
+            testDb.prepare('DELETE FROM automation_events WHERE id IN (?, ?)').run(eventId, failedEventId);
+            testDb.prepare('DELETE FROM automation_runs WHERE run_id = ?').run(runId);
+            testDb.close();
+        }
+    });
+
+    test('failed listing statuses can be reset to ready without deleting products', async () => {
+        const listingId = await DataService.addListing({ title: `Reset Status Test ${Date.now()}` });
+        try {
+            DataService.updateListingStatus(listingId, 'failed');
+            const result = DataService.resetFailedListings();
+            const listing = (await DataService.getListings()).find(item => item.id === listingId);
+            expect(result.changes).toBeGreaterThanOrEqual(1);
+            expect(listing).toBeDefined();
+            expect(listing.status).toBe('ready');
+            expect(listing.last_posted).toBeNull();
+        } finally {
+            await DataService.deleteListing(listingId);
+        }
+    });
+});

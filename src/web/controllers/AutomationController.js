@@ -2,6 +2,10 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const DataService = require("../services/dataService");
 const QueueService = require("../services/queueService");
+const { normalizeFacebookUrl } = require("../../utils/facebookUrl");
+
+const AUTOMATION_MODES = new Set(["all", "viral", "marketplace", "comment", "chat"]);
+const STOPPABLE_MODES = new Set([...AUTOMATION_MODES, "sundul"]);
 
 class AutomationController {
 	static getAutomationStatus(_req, res) {
@@ -18,20 +22,27 @@ class AutomationController {
 	}
 
 	static async runAutomation(req, res) {
-		const { mode, accountId, commentTargetUrl, targetUrl } = req.body;
-		const target = commentTargetUrl || targetUrl || null;
-		const queue = QueueService.getQueue(mode);
-		const started = queue.startFullAutomation(mode, accountId, target);
+		const { mode, accountId, commentTargetUrl, targetUrl } = req.body || {};
+		const runMode = mode || "all";
+		if (!AUTOMATION_MODES.has(runMode)) {
+			return res.status(400).json({ error: "Mode otomasi tidak valid" });
+		}
+		const rawTarget = commentTargetUrl || targetUrl || null;
+		const target = rawTarget ? normalizeFacebookUrl(rawTarget) : null;
+		if (rawTarget && !target) return res.status(400).json({ error: "URL target harus HTTPS Facebook yang valid" });
+		const queue = QueueService.getQueue(runMode);
+		const started = queue.startFullAutomation(runMode, accountId, target);
 		if (started) {
-			res.json({ success: true, message: `Otomasi ${mode} dimulai` });
+			res.json({ success: true, message: `Otomasi ${runMode} dimulai` });
 		} else {
-			res.status(400).json({ error: `Otomasi ${mode} sudah berjalan` });
+			res.status(400).json({ error: `Otomasi ${runMode} sudah berjalan` });
 		}
 	}
 
 	static async stopAutomation(req, res) {
 		const { mode } = req.body || {};
 		if (mode && mode !== "all") {
+			if (!STOPPABLE_MODES.has(mode)) return res.status(400).json({ error: "Mode otomasi tidak valid" });
 			const queue = QueueService.getQueue(mode);
 			const stopped = queue.stopAutomation();
 			if (stopped) {
@@ -52,7 +63,9 @@ class AutomationController {
 			});
 		}
 
-		const { url, groupId } = req.body;
+		const { url: rawUrl, groupId } = req.body || {};
+		const url = rawUrl ? normalizeFacebookUrl(rawUrl) : null;
+		if (rawUrl && !url) return res.status(400).json({ error: "URL scraper harus HTTPS Facebook yang valid" });
 		const appConfig = DataService.getAppConfig();
 		const scraperAccountId = appConfig.scraper_account_id;
 		if (!scraperAccountId) {

@@ -818,7 +818,9 @@ async function processAccount(account, cli) {
 		}
 
 		logger.info("Memindai kartu listing Facebook dan mencocokkan dengan katalog aktif aplikasi...");
-		const listings = await discoverListings(page);
+		// Skala target scan dengan kebutuhan: judul spesifik tak perlu sapu 250 kartu.
+		const scanTarget = cli.autoMode ? 250 : Math.min(250, Math.max(30, (cli.titles || []).length * 10));
+		const listings = await discoverListings(page, scanTarget);
 		const recentRenewals = DataService.getRecentMarketplaceRenewals(account.id, 7);
 		const recentKeys = new Set(recentRenewals.map((renewal) => renewal.listing_key));
 		const localListings = (await DataService.getListings()).filter(

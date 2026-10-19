@@ -1,5 +1,6 @@
 const DataService = require("../services/dataService");
 const QueueService = require("../services/queueService");
+const { normalizeFacebookUrl } = require("../../utils/facebookUrl");
 
 class AgentController {
 	static async getAgentStats(_req, res) {
@@ -38,9 +39,17 @@ class AgentController {
 	}
     
     static async runAgent(req, res) {
-		const { accountId, limit, targetUrl } = req.body;
+		const { accountId, limit, targetUrl } = req.body || {};
+		const actionLimit = limit == null ? 5 : Number(limit);
+		if (!Number.isInteger(actionLimit) || actionLimit < 1 || actionLimit > 20) {
+			return res.status(400).json({ error: "Limit AI Agent harus antara 1 dan 20" });
+		}
+		const safeTargetUrl = targetUrl ? normalizeFacebookUrl(targetUrl) : null;
+		if (targetUrl && !safeTargetUrl) {
+			return res.status(400).json({ error: "URL target harus HTTPS Facebook yang valid" });
+		}
 		const queue = QueueService.getQueue("agent");
-		const started = queue.startAgent(accountId, limit || 5, targetUrl);
+		const started = queue.startAgent(accountId, actionLimit, safeTargetUrl);
 		if (started) {
 			res.json({ success: true, message: "AI Agent dimulai" });
 		} else {

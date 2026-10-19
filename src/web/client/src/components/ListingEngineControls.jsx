@@ -1,10 +1,9 @@
-import React from 'react';
 import { Bot } from 'lucide-react';
 
 export default function ListingEngineControls({ listing, handleChange }) {
   return (
     <div style={{ background: 'var(--bg)', borderRadius: '16px', border: '1px solid var(--border)', overflow: 'hidden' }}>
-      <div style={{ padding: '20px 24px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '20px 24px', background: 'var(--surface-tint)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <Bot size={18} style={{ color: 'var(--text)' }} />
           <h3 style={{ fontSize: '1.05rem', fontWeight: 500, margin: 0 }}>Konfigurasi Otomatisasi</h3>

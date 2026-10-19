@@ -1,12 +1,12 @@
 import { useState, useCallback } from 'react';
-import { User, ExternalLink, LogOut, Plus, X, Settings, Trash } from 'lucide-react';
+import { User, ExternalLink, LogOut, Plus, X, Star, Trash } from 'lucide-react';
 import { api } from '../services/api';
-import { useAutoSave, SaveStatus } from '../hooks/useAutoSave';
+import { useAutoSave } from '../hooks/useAutoSave';
 import { useToast } from '../components/ToastContext';
 import { useConfirm } from '../components/ConfirmContext';
 
 // Sub-component: one account card with auto-save toggle
-function AccountCard({ acc, index, onLink, onLogout, onDelete }) {
+function AccountCard({ acc, isAndalan, onSetAndalan, onLink, onLogout, onDelete, linking }) {
   const [isActive, setIsActive] = useState(acc.isActive);
 
   const saveFn = useCallback(
@@ -17,7 +17,7 @@ function AccountCard({ acc, index, onLink, onLogout, onDelete }) {
     }),
     [acc.id]
   );
-  const { triggerSave, status } = useAutoSave(saveFn, 0); // instant for toggles
+  const { triggerSave } = useAutoSave(saveFn, 0); // instant for toggles
 
   const handleToggle = (e) => {
     const val = e.target.checked;
@@ -26,101 +26,74 @@ function AccountCard({ acc, index, onLink, onLogout, onDelete }) {
   };
 
   return (
-    <div className="item-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <div className="account-avatar">
-            {acc.fbPic ? <img src={acc.fbPic} alt="Profile" /> : <User size={24} />}
-          </div>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>{acc.fbName || acc.name}</h3>
-            <span className={`status-badge ${acc.linked ? 'badge-linked' : 'badge-pending'}`} style={{ marginTop: '5px' }}>
-              {acc.linked ? 'LINKED' : 'NOT LINKED'}
-            </span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <SaveStatus status={status} />
-          <input
-            type="checkbox"
-            className="switch"
-            checked={isActive}
-            onChange={handleToggle}
-          />
-          <span style={{ 
-            fontSize: '0.8rem', 
-            fontWeight: 600, 
-            letterSpacing: '0.02em',
-            color: isActive ? 'var(--success)' : 'var(--text-muted)' 
-          }}>
-            {isActive ? 'AKTIF' : 'OFF'}
-          </span>
-        </div>
+    <div className="item-card" style={{ padding: '14px 16px', borderColor: isAndalan ? 'rgba(245,158,11,0.5)' : undefined }}>
+      <div style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6, minHeight: 14, color: isAndalan ? '#F59E0B' : 'transparent', userSelect: 'none' }} aria-hidden={!isAndalan}>
+        ★ ANDALAN
       </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <span className="label-text">Direktori Profil</span>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: '6px' }}>
-          {acc.profile}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <div className="account-avatar">
+          {acc.fbPic ? <img src={acc.fbPic} alt="" /> : <User size={24} />}
         </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button className="btn btn-outline" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={() => onLink(acc.id)}>
-          <ExternalLink size={16} />
-          <span>{acc.linked ? 'Sync Login' : 'Link Akun'}</span>
-        </button>
-        {acc.linked && (
-          <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 15px' }} onClick={() => onLogout(acc.id)}>
-            <LogOut size={16} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.fbName || acc.name}</h3>
+          <div style={{ fontSize: '0.78rem', marginTop: '4px', color: acc.linked ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>
+            {acc.linked ? '● Terhubung' : '○ Belum login'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <button
+            onClick={() => onSetAndalan(acc.id)}
+            title={isAndalan ? 'Akun andalan — klik untuk lepas' : 'Jadikan akun andalan'}
+            aria-label={isAndalan ? `Lepas andalan ${acc.fbName || acc.name}` : `Jadikan andalan ${acc.fbName || acc.name}`}
+            aria-pressed={!!isAndalan}
+            style={{
+              background: isAndalan ? 'rgba(245,158,11,0.12)' : 'none',
+              border: isAndalan ? '1px solid rgba(245,158,11,0.5)' : '1px solid transparent',
+              borderRadius: 8, cursor: 'pointer', padding: 0, flexShrink: 0,
+              width: 32, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              color: isAndalan ? '#F59E0B' : 'var(--text-muted)',
+            }}
+          >
+            <Star size={16} fill={isAndalan ? 'currentColor' : 'none'} style={{ display: 'block' }} />
           </button>
-        )}
-        <button className="btn btn-danger" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 15px' }} onClick={() => onDelete(acc.id)} title="Hapus Akun">
-          <Trash size={16} />
+          <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', height: 32 }} title="OFF = bot lewati akun ini">
+            <input
+              type="checkbox"
+              className="switch"
+              checked={isActive}
+              onChange={handleToggle}
+              aria-label={`Ikut jualan ${acc.fbName || acc.name}`}
+            />
+          </label>
+        </div>
+      </div>
+
+      {!acc.linked ? (
+        <button className="btn btn-primary" style={{ width: '100%', minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={() => onLink(acc.id)} disabled={!!linking}>
+          <ExternalLink size={16} />
+          <span>{linking ? 'Membuka browser…' : 'Hubungkan Facebook'}</span>
         </button>
-      </div>
+      ) : (
+        <>
+          <button className="btn btn-outline" style={{ width: '100%', minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '6px' }} onClick={() => onLink(acc.id)} disabled={!!linking}>
+            <ExternalLink size={16} />
+            <span>{linking ? 'Membuka browser…' : 'Cek Login'}</span>
+          </button>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', fontSize: '0.8rem' }}>
+            <button onClick={() => onLogout(acc.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <LogOut size={14} /> Keluar
+            </button>
+            <button onClick={() => onDelete(acc.id)} aria-label={`Hapus akun ${acc.fbName || acc.name}`} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '6px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <Trash size={14} /> Hapus
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-// Sub-component: bot config dropdown with auto-save
-function BotConfigSelect({ label, configKey, value, accounts }) {
-  const [val, setVal] = useState(value || '');
-
-  const saveFn = useCallback(
-    (v) => api.setConfig(configKey, v),
-    [configKey]
-  );
-  const { triggerSave, status } = useAutoSave(saveFn, 0);
-
-  const handleChange = (e) => {
-    setVal(e.target.value);
-    triggerSave(e.target.value);
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-        <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {label}
-        </label>
-        <SaveStatus status={status} />
-      </div>
-      <select
-        value={val}
-        onChange={handleChange}
-        style={{ width: '100%', padding: '10px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '10px', color: 'white', fontSize: '0.9rem' }}
-      >
-        <option value="">(Tidak ada - gunakan profil default)</option>
-        {accounts.map(a => (
-          <option key={a.id} value={a.id}>
-            {a.fbName || a.name} {a.linked ? '(Linked)' : ''}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
+// Sub-component: satu pilihan andalan untuk kedua peran khusus.
 
 export default function Accounts({ 
   accounts = [], 
@@ -130,22 +103,45 @@ export default function Accounts({
   config, 
   onRefresh 
 }) {
-  const [showGroupOnly, setShowGroupOnly] = useState(true);
+  const [showGroupOnly, setShowGroupOnly] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
 
+  const andalanId = config?.scraper_account_id || config?.debug_account_id || '';
+  const [linkingId, setLinkingId] = useState(null);
+
   const activeGroup = selectedGroupId ? groups.find(g => g.id === Number(selectedGroupId)) : null;
+
+  const setAndalan = async (id) => {
+    const next = andalanId === id ? '' : id;
+    try {
+      await api.setConfig('scraper_account_id', next);
+      await api.setConfig('debug_account_id', next);
+      toast.success(next ? 'Akun andalan disimpan' : 'Andalan dilepas');
+      onRefresh();
+    } catch (err) {
+      toast.error(`Gagal simpan andalan: ${err.message}`);
+    }
+  };
   const displayedAccounts = (activeGroup && showGroupOnly)
     ? accounts.filter(a => activeGroup.accounts?.includes(a.id))
     : accounts;
 
   const linkAccount = async (id) => {
+    if (linkingId) return;
+    setLinkingId(id);
     try {
-      await fetch(`/api/accounts/${id}/link`, { method: 'POST' });
+      const res = await fetch(`/api/accounts/${id}/link`, { method: 'POST' });
+      if (res.status === 409) {
+        toast.error('Login akun ini sedang berjalan. Tunggu browser yang sudah terbuka.');
+        return;
+      }
       toast.success('Browser login terbuka. Silakan selesaikan login di window baru.');
       onRefresh();
     } catch (err) {
       console.error(err);
+    } finally {
+      setLinkingId(null);
     }
   };
 
@@ -162,7 +158,7 @@ export default function Accounts({
   };
 
   const deleteAccount = async (id) => {
-    if (!(await confirm('Hapus akun ini? Direktori profile juga akan ikut terhapus permanen!'))) return;
+    if (!(await confirm('Hapus akun ini permanen? Login dan data browser ikut hilang. Tidak bisa urung.'))) return;
     try {
       await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
       toast.success('Akun berhasil dihapus');
@@ -206,13 +202,13 @@ export default function Accounts({
               background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.25)',
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
-              <User size={20} color="#10B981" />
+              <User size={20} color="var(--success)" />
             </div>
             <div>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: '#FAFAFA' }}>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>
                 Fokus Grup: {activeGroup.name}
               </div>
-              <div style={{ fontSize: '13px', color: '#A1A1AA', marginTop: '2px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
                 Menampilkan {displayedAccounts.length} akun yang terhubung ke grup ini.
               </div>
             </div>
@@ -253,7 +249,7 @@ export default function Accounts({
         {displayedAccounts.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', padding: '40px', textAlign: 'center', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border)' }}>
             {activeGroup && showGroupOnly 
-              ? `Belum ada akun di grup "${activeGroup.name}". Atur anggota grup di tab Manajemen Grup.`
+              ? `Belum ada akun di grup "${activeGroup.name}". Atur anggota grup di Workspace.`
               : 'Belum ada akun terdaftar. Tambahkan akun baru untuk memulai.'}
           </div>
         ) : (
@@ -261,42 +257,20 @@ export default function Accounts({
             <AccountCard
               key={acc.id || index}
               acc={acc}
-              index={index}
+              isAndalan={andalanId === acc.id}
+              onSetAndalan={setAndalan}
               onLink={linkAccount}
               onLogout={logoutAccount}
               onDelete={deleteAccount}
+              linking={linkingId === acc.id}
             />
           ))
         )}
       </div>
 
-      {/* Bot Settings */}
-      <div style={{ marginTop: '40px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-          <Settings size={20} style={{ color: 'var(--text-muted)' }} />
-          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 500, letterSpacing: '-0.02em' }}>Bot Settings</h2>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '4px' }}>— perubahan tersimpan otomatis</span>
-        </div>
-        <div className="item-card">
-          <p style={{ margin: '0 0 20px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            Pilih akun Facebook yang digunakan oleh bot scraper dan debug.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            <BotConfigSelect
-              label="Akun Scraper"
-              configKey="scraper_account_id"
-              value={config?.scraper_account_id}
-              accounts={accounts}
-            />
-            <BotConfigSelect
-              label="Akun Debug"
-              configKey="debug_account_id"
-              value={config?.debug_account_id}
-              accounts={accounts}
-            />
-          </div>
-        </div>
-      </div>
+      <p style={{ margin: '20px 0 0', fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+        ★ adalah akun andalan untuk pengambilan data dan pengujian. Klik bintang pada kartu untuk memilih.
+      </p>
     </section>
   );
 }

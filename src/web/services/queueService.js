@@ -94,6 +94,15 @@ class JobQueue extends EventEmitter {
 			env,
 		});
 
+		try {
+			const DataService = require("./dataService");
+			DataService.setQueueState(mode, {
+				running: true,
+				pid: this.currentProcess.pid || null,
+				startedAt: new Date().toISOString(),
+			});
+		} catch (_e) {}
+
 		this.currentProcess.stdout.on("data", (data) => {
 			data.toString()
 				.split("\n")
@@ -126,6 +135,13 @@ class JobQueue extends EventEmitter {
 			this.isRunning = false;
 			this.currentProcess = null;
 			this._unwireLogPersist();
+			try {
+				const DataService = require("./dataService");
+				DataService.setQueueState(mode, {
+					running: false,
+					endedAt: new Date().toISOString(),
+				});
+			} catch (_e) {}
 			this.emit("status", this.getStatus());
 			this.emit("done");
 		});
@@ -259,6 +275,13 @@ class JobQueue extends EventEmitter {
 			this.isRunning = false;
 			this.currentProcess = null;
 			this._unwireLogPersist();
+			try {
+				const DataService = require("./dataService");
+				DataService.setQueueState(this.queueMode, {
+					running: false,
+					endedAt: new Date().toISOString(),
+				});
+			} catch (_e) {}
 			this.emit("status", this.getStatus());
 			return true;
 		}
@@ -303,8 +326,8 @@ const queues = {
 module.exports = {
 	getQueue: (mode) => {
 		const targetMode = mode || "all";
-		if (!queues[targetMode]) {
-			queues[targetMode] = new JobQueue(targetMode);
+		if (!Object.prototype.hasOwnProperty.call(queues, targetMode)) {
+			throw new RangeError(`Unsupported queue mode: ${targetMode}`);
 		}
 		return queues[targetMode];
 	},
@@ -312,7 +335,7 @@ module.exports = {
 	isAnyRunning: () => Object.values(queues).some((queue) => queue.isRunning),
 	// Compatibility properties for backward compat with default root tests / generic imports
 	startFullAutomation: (mode, accountId) =>
-		queues[mode || "all"].startFullAutomation(mode, accountId),
+		module.exports.getQueue(mode).startFullAutomation(mode, accountId),
 	stopAutomation: () => {
 		let stopped = false;
 		for (const q of Object.values(queues)) {

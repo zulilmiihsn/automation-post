@@ -159,6 +159,11 @@ class FacebookBot {
 		if (!this.page) throw new Error("Bot not initialized. Call init() first.");
 		return await this.chat.replyToInbox(options);
 	}
+
+	async followUpThreads(account, candidates, options) {
+		if (!this.page) throw new Error("Bot not initialized. Call init() first.");
+		return await this.chat.followUpThreads(account, candidates, options);
+	}
 }
 
 module.exports = FacebookBot;

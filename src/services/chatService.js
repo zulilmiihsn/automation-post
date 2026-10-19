@@ -1,10 +1,12 @@
 const Logger = require("../utils/logger");
 const InteractionEngine = require("../core/interactionEngine");
 const AIChatService = require("./aiChatService");
+const { BUBBLES_JS } = require("./chatThread");
 
 class ChatService {
 	constructor(page, accountName = "CHAT") {
 		this.page = page;
+		this.accountName = accountName;
 		this.engine = new InteractionEngine(page, accountName);
 		this.logger = new Logger(accountName);
 	}
@@ -14,7 +16,7 @@ class ChatService {
 	 * @param {object} options - Options including customized reply templates
 	 */
 	async replyToInbox(options = {}) {
-		const replyText = options.replyText || "Masih, langsung lanjut WA ya";
+		const replyText = options.replyText || "Masih ada, bosku. Surat lengkap, mesin dan kelistrikan normal; boleh cek/tes langsung. Mau atur waktu?";
 		const useAI = options.useAI !== false; // Default enabled
 		this.logger.info(`Membuka Inbox Marketplace... (AI mode: ${useAI})`);
 
@@ -35,8 +37,14 @@ class ChatService {
 				return { success: false, error: "Session expired / Not logged in" };
 			}
 			
-			// Wait for inbox threads to load
-			const threadSelector = 'a[href*="/marketplace/inbox/thread/"], a[href*="/messages/t/"], div[role="gridcell"] a[role="link"]';
+			// Wait for inbox threads to load (semantic dulu dari rekaman: role link "Obrolan grup: ...")
+			const threadSelector = [
+				'a[aria-label*="Obrolan grup" i]',
+				'a[aria-label*="Obrolan" i]',
+				'a[href*="/marketplace/inbox/thread/"]',
+				'a[href*="/messages/t/"]',
+				'div[role="gridcell"] a[role="link"]',
+			].join(", ");
 			await this.page.waitForSelector(threadSelector, { timeout: 2000 }).catch(() => {});
 			
 			// Wait stable
@@ -44,6 +52,7 @@ class ChatService {
 
 			let processedCount = 0;
 			const maxChats = 15;
+			const threadResults = [];
 
 			// Scroll sidebar to load more chats (lazy loading bypass)
 			this.logger.info("Memuat & menscroll daftar chat...");
@@ -98,11 +107,13 @@ class ChatService {
 
 				if (isAlreadyReplied) {
 					this.logger.info(`Lewati chat "${firstLine.trim()}": Sudah dibalas oleh kita.`);
+					threadResults.push({ buyer: firstLine.trim(), status: "skipped", reason: "sudah-dibalas" });
 					continue;
 				}
 
 				if (!matchesKeyword) {
 					this.logger.info(`Lewati chat "${firstLine.trim()}": Tidak cocok kata kunci.`);
+					threadResults.push({ buyer: firstLine.trim(), status: "skipped", reason: "tak-cocok-keyword" });
 					continue;
 				}
 
@@ -118,57 +129,33 @@ class ChatService {
 						await this.handleE2eeUnlock(options.pin);
 					}
 
+					// Muat riwayat penuh: scroll pane ke atas hingga mentok (max 8x) agar AI punya konteks
+					await this._loadFullHistory();
+
 					// Determine if the last message requires a reply from DOM history (for non-E2EE)
-					const decision = await this.page.evaluate(() => {
-						const msgSelector = 'div.xexx8yu.xyri2b.x18d9i69.x1c1uobl, [data-testid="message-text"], span.x1lliihq.x6ikm8r.x10wlt62.x1n2onr6.xlyipyv.xuxw1ft';
-						const msgBubbles = Array.from(document.querySelectorAll(msgSelector));
-						
-						if (msgBubbles.length === 0) {
-							// E2EE Locked or blank chat pane. Since sidebar preview already verified it, we allow reply fallback.
-							return { shouldReply: true, isE2eeFallback: true, reason: "Pesan terenkripsi E2EE / tidak terbaca di DOM, gunakan data sidebar." };
-						}
-
-						const chatContainer = document.querySelector('[role="main"]') || msgBubbles[0].closest('[role="grid"]') || msgBubbles[0].parentElement;
-						if (!chatContainer) {
-							return { shouldReply: true, isE2eeFallback: true, reason: "Container tidak ditemukan, gunakan data sidebar." };
-						}
-
-						const containerRect = chatContainer.getBoundingClientRect();
-
-						// Filter empty texts and map with alignment heuristics
-						const messages = msgBubbles.map(el => {
-							const rect = el.getBoundingClientRect();
-							const text = (el.innerText || el.textContent || "").trim();
-							if (rect.width === 0 || rect.height === 0) return null;
-							
-							const distToRight = containerRect.right - rect.right;
-							const distToLeft = rect.left - containerRect.left;
-							const isOutgoing = distToRight < distToLeft; // Right-aligned means sent by us
-							return { text, isOutgoing };
-						}).filter(m => m !== null && m.text.length > 0);
-
-						if (messages.length === 0) {
-							return { shouldReply: true, isE2eeFallback: true, reason: "Semua pesan kosong, gunakan data sidebar." };
-						}
-
+					const rawBubbles = await this.page.evaluate(BUBBLES_JS, {
+						buyerFirst: (firstLine.trim().split(" ")[0] || "").toLowerCase(),
+						myName: (this.accountName || "").split(" ")[0].toLowerCase(),
+					}).catch(() => []);
+					const messages = (rawBubbles || [])
+						.filter((m) => !m.sys)
+						.map((m) => ({ text: m.text, isOutgoing: m.out }));
+					let decision;
+					if (messages.length === 0) {
+						decision = { shouldReply: true, isE2eeFallback: true, reason: "Pesan terenkripsi E2EE / tidak terbaca di DOM, gunakan data sidebar.", messages: [] };
+					} else {
 						const lastMsg = messages[messages.length - 1];
-
-						// Check if we are the last sender in history
 						if (lastMsg.isOutgoing) {
-							return { shouldReply: false, reason: "Pesan terakhir dikirim oleh kita (sudah dibalas).", messages };
+							decision = { shouldReply: false, reason: "Pesan terakhir dikirim oleh kita (sudah dibalas).", messages };
+						} else {
+							const lastText = lastMsg.text.toLowerCase();
+							const kws = ["masih ada", "ready", "masih?", "ada?", "apakah ini masih ada", "barang ini masih ada"];
+							const matches = kws.some((kw) => lastText.includes(kw));
+							decision = matches
+								? { shouldReply: true, clientMessage: lastMsg.text, messages }
+								: { shouldReply: false, reason: `Pesan terakhir tidak cocok kata kunci: "${lastMsg.text}"`, messages };
 						}
-
-						// Check message text for buy/availability keywords
-						const lastText = lastMsg.text.toLowerCase();
-						const kws = ["masih ada", "ready", "masih?", "ada?", "apakah ini masih ada", "barang ini masih ada"];
-						const matches = kws.some(kw => lastText.includes(kw));
-
-						if (matches) {
-							return { shouldReply: true, clientMessage: lastMsg.text, messages };
-						}
-
-						return { shouldReply: false, reason: `Pesan terakhir tidak cocok kata kunci: "${lastMsg.text}"`, messages };
-					});
+					}
 
 					if (decision.messages && decision.messages.length > 0) {
 						const lastFew = decision.messages.slice(-3);
@@ -178,10 +165,12 @@ class ChatService {
 					if (decision.shouldReply) {
 						// Generate AI reply or use template
 						let finalReply = replyText;
-						if (useAI) {
+						if (useAI && decision.clientMessage) {
 							const aiReply = await AIChatService.generateReply(
-								decision.clientMessage || firstLine.trim(),
-								{ title: firstLine.trim() }
+								decision.clientMessage,
+								{},
+								decision.messages || [],
+								{ username: firstLine.trim().slice(0, 80) },
 							);
 							if (aiReply) {
 								finalReply = aiReply;
@@ -205,25 +194,161 @@ class ChatService {
 							await this.page.keyboard.press("Enter");
 							this.logger.success(`Balasan terkirim ke "${firstLine.trim()}".`);
 							processedCount++;
+							threadResults.push({ buyer: firstLine.trim(), status: "replied", reply: finalReply.slice(0, 200) });
 							await this.engine.delay(3000, 5000); // Random delay after reply
 						} else {
 							this.logger.warn("Elemen textbox chat tidak ditemukan atau tersembunyi.");
+							threadResults.push({ buyer: firstLine.trim(), status: "failed", reason: "textbox-tak-temu" });
 						}
 					} else {
 						this.logger.info(`Lewati chat: ${decision.reason}`);
+						threadResults.push({ buyer: firstLine.trim(), status: "skipped", reason: decision.reason });
 					}
 				} catch (err) {
 					this.logger.error(`Gagal memproses chat ke-${i + 1}: ${err.message}`);
+					threadResults.push({ buyer: firstLine.trim(), status: "failed", reason: err.message.slice(0, 120) });
 				}
 				
 				await this.engine.delay(1000, 2000);
 			}
 
 			this.logger.success(`Selesai memproses inbox. Total dibalas: ${processedCount} chat.`);
-			return { success: true, replied: processedCount };
+			return { success: true, replied: processedCount, threads: threadResults };
 		} catch (err) {
 			this.logger.error("Kesalahan fatal saat membalas inbox", err);
 			return { success: false, error: err.message };
+		}
+	}
+
+	async _openThreadByBuyer(thread, timeout = 8000) {
+		const escRx = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const first = (thread.topic || "").split(" ").filter(Boolean)[0] || "";
+		const locs = [
+			this.page.locator('div[role="button"], a[role="link"]').filter({ hasText: new RegExp(escRx(thread.buyer) + ".*" + escRx(first), "i") }).first(),
+			this.page.locator('div[role="button"], a[role="link"]').filter({ hasText: new RegExp(escRx(thread.buyer), "i") }).first(),
+		];
+		for (const loc of locs) {
+			try {
+				await loc.click({ timeout: 5000 });
+				await this.engine.delay(2500, 3500);
+				const box = this.page.locator('div[role="textbox"]').first();
+				if (await box.isVisible().catch(() => false)) {
+					const label = (await box.getAttribute("aria-label").catch(() => "")) || "";
+					if (!thread.buyer || label.toLowerCase().includes(thread.buyer.split(" ")[0].toLowerCase())) return true;
+				}
+			} catch (_e) {}
+		}
+		return false;
+	}
+
+	/**
+	 * Follow-up thread sunyi: kita terakhir bicara + sunyi N hari.
+	 * @returns {Promise<Array>} hasil per thread
+	 */
+	async followUpThreads(account, candidates, options = {}) {
+		const { pin, useAI = true, replyText = "Halo kak, unit masih tersedia. Mau atur waktu cek?", onSent = null } = options;
+		const out = [];
+		for (const thread of candidates) {
+			try {
+				const opened = await this._openThreadByBuyer(thread);
+				if (!opened) {
+					out.push({ key: thread.key, buyer: thread.buyer, status: "failed", reason: "thread-tak-terbuka" });
+					continue;
+				}
+				if (pin) await this.handleE2eeUnlock(pin);
+				await this._loadFullHistory(4);
+				const history = await this._readHistory(thread.buyer);
+				const lastBuyer = [...history].reverse().find((m) => !m.isOutgoing);
+				let finalReply = replyText;
+				if (useAI) {
+					const aiReply = await AIChatService.generateReply(
+						lastBuyer ? lastBuyer.text : `Sapa ulang ${thread.buyer} soal ${thread.topic}`,
+						{ title: thread.topic },
+						history,
+						{ username: `${thread.buyer}`, followup: true },
+					);
+					if (aiReply) finalReply = aiReply;
+				}
+				const textbox = this.page.locator('div[role="textbox"]').first();
+				if (!(await textbox.isVisible().catch(() => false))) {
+					out.push({ key: thread.key, buyer: thread.buyer, status: "failed", reason: "textbox-tak-temu" });
+					continue;
+				}
+				await textbox.focus();
+				await this.engine.humanType(textbox, finalReply);
+				await this.engine.delay(500, 1000);
+				await this.page.keyboard.press("Enter");
+				await this.engine.delay(3000, 5000);
+				out.push({ key: thread.key, buyer: thread.buyer, status: "replied", reply: finalReply.slice(0, 200) });
+				if (onSent) await onSent(thread, finalReply);
+			} catch (e) {
+				out.push({ key: thread.key, buyer: thread.buyer, status: "failed", reason: (e.message || "").slice(0, 120) });
+			}
+			await this.engine.delay(1000, 2000);
+		}
+		return out;
+	}
+
+	async _readHistory(buyerFirst = "") {
+		const bf = String(buyerFirst || "").toLowerCase();
+		return await this.page.evaluate((bf) => {
+			const els = Array.from(document.querySelectorAll('div[role="presentation"], [data-testid="message-text"]'));
+			const out = [];
+			for (const b of els) {
+				const t = (b.innerText || b.textContent || "").trim();
+				if (!t || t.length <= 1 || t.length >= 500) continue;
+				if (/detail percakapan/i.test(t)) continue;
+				if (/^(sen|sel|rab|kam|jum|sab|min)\b/i.test(t) && t.length < 30) continue;
+				if (/^message sent$/i.test(t)) continue;
+				let named = "";
+				let p = b;
+				for (let d = 0; d < 5 && p; d++) {
+					const a = (p.getAttribute && p.getAttribute("aria-label")) || "";
+					const m = a.match(/(?:pukul|at)\s+[^,]*,\s*(.+?)\s*:/i);
+					if (m) {
+						named = m[1].toLowerCase();
+						break;
+					}
+					p = p.parentElement;
+				}
+				out.push({ text: t, named });
+			}
+			const seen = new Set();
+			return out.filter((m) => {
+				if (seen.has(m.text)) return false;
+				seen.add(m.text);
+				return true;
+			}).slice(-12).map((m) => ({ text: m.text, isOutgoing: !(bf && m.named.includes(bf)) }));
+		}, bf).catch(() => []);
+	}
+
+	async _loadFullHistory(maxScrolls = 8) {
+		const sel = [
+			'div[role="presentation"]',
+			'[aria-label^="Pukul" i]',
+			'[data-testid="message-text"]',
+		].join(", ");
+		let lastCount = -1;
+		for (let i = 0; i < maxScrolls; i++) {
+			const count = await this.page.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0);
+			if (count === lastCount) break;
+			lastCount = count;
+			await this.page.evaluate(() => {
+				const main = document.querySelector('[role="main"]');
+				const scroller = (el) => {
+					let p = el;
+					while (p && p !== document.body) {
+						const st = getComputedStyle(p);
+						if (/auto|scroll/.test(st.overflowY) && p.scrollHeight > p.clientHeight + 50) return p;
+						p = p.parentElement;
+					}
+					return null;
+				};
+				const pane = scroller(main) || main || document.scrollingElement;
+				if (pane) pane.scrollTop = 0; // tarik ke atas = muat pesan lama
+				else window.scrollBy(0, -800);
+			}).catch(() => {});
+			await this.engine.delay(700, 1100);
 		}
 	}
 

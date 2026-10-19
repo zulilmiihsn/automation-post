@@ -23,6 +23,23 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch listings');
     return res.json();
   },
+  getPhotoHealth: async () => {
+    const res = await fetch('/api/listings/photo-health');
+    if (!res.ok) throw new Error('Failed to fetch photo health');
+    return res.json();
+  },
+  deletePhoto: async (photo) => {
+    const res = await fetch('/api/photos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete photo');
+    }
+    return res.json();
+  },
   createListing: async (data) => {
     const res = await fetch('/api/listings', {
       method: 'POST',
@@ -47,6 +64,22 @@ export const api = {
     }
     return res.json();
   },
+  deleteListing: async (id) => {
+    const res = await fetch(`/api/listings/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete listing');
+    }
+    return res.json();
+  },
+  deleteAccount: async (id) => {
+    const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete account');
+    }
+    return res.json();
+  },
   bulkUpdateListings: async (ids, updates) => {
     const res = await fetch('/api/listings/bulk-update', {
       method: 'POST',
@@ -68,6 +101,64 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to bulk delete listings');
+    }
+    return res.json();
+  },
+  trashListings: async (ids) => {
+    const res = await fetch('/api/listings/trash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to trash listings');
+    }
+    return res.json();
+  },
+  restoreTrash: async (trashIds) => {
+    const res = await fetch('/api/listings/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashIds })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to restore listings');
+    }
+    return res.json();
+  },
+  listTrash: async (limit = 100) => {
+    const res = await fetch(`/api/listings/trash?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to fetch trash');
+    return res.json();
+  },
+  deleteTrashPermanent: async (trashIds) => {
+    const res = await fetch('/api/listings/trash/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashIds })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete trash');
+    }
+    return res.json();
+  },
+  listOrphans: async () => {
+    const res = await fetch('/api/photos/orphans');
+    if (!res.ok) throw new Error('Failed to scan orphans');
+    return res.json();
+  },
+  cleanOrphans: async (limit = 200) => {
+    const res = await fetch('/api/photos/clean', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to clean orphans');
     }
     return res.json();
   },
@@ -226,6 +317,67 @@ export const api = {
     return res.json();
   },
 
+  // --- Chat inbox ---
+  getChatThreads: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.accountId) qs.set('accountId', params.accountId);
+    if (params.limit) qs.set('limit', params.limit);
+    const res = await fetch(`/api/chat/threads?${qs.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch chat threads');
+    return res.json();
+  },
+  getChatMessages: async (threadKey) => {
+    const b64 = btoa(unescape(encodeURIComponent(threadKey))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    const res = await fetch(`/api/chat/threads/${b64}/messages`);
+    if (!res.ok) throw new Error('Failed to fetch chat messages');
+    return res.json();
+  },
+  readChatThread: async (threadKey) => {
+    const b64 = btoa(unescape(encodeURIComponent(threadKey))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    const res = await fetch(`/api/chat/threads/${b64}/read`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to read thread');
+    }
+    return res.json();
+  },
+  syncChatInbox: async (accountId) => {
+    const res = await fetch('/api/chat/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to sync inbox');
+    }
+    return res.json();
+  },
+  runChatFollowup: async (accountId) => {
+    const res = await fetch('/api/chat/followup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to run followup');
+    }
+    return res.json();
+  },
+  sendChatMessage: async (accountId, threadKey, text) => {
+    const res = await fetch('/api/chat/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId, threadKey, text })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to send message');
+    }
+    return res.json();
+  },
+
   // --- Health ---
   getHealth: async () => {
     const res = await fetch('/api/health');
@@ -314,8 +466,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    if (!res.ok) throw new Error('Failed to add schedule');
-    return res.json();
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error || 'Failed to add schedule');
+    return result;
   },
   updateSchedule: async (id, data) => {
     const res = await fetch(`/api/schedules/${id}`, {
@@ -356,6 +509,13 @@ export const api = {
     if (!res.ok) throw new Error('Failed to mark all read');
     return res.json();
   },
+  clearNotifications: async ({ readOnly = false } = {}) => {
+    const suffix = readOnly ? '?readOnly=true' : '';
+    const res = await fetch(`/api/notifications${suffix}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Gagal menghapus notifikasi (HTTP ${res.status})`);
+    return data;
+  },
 
   // --- Analytics & Reports ---
   getAnalyticsActivity: async (days = 7) => {
@@ -368,9 +528,19 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch listing stats');
     return res.json();
   },
+  resetFailedListings: async () => {
+    const res = await fetch('/api/listings/reset-failed', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to reset failed listing statuses');
+    return res.json();
+  },
   getDailyReports: async (limit = 30) => {
     const res = await fetch(`/api/reports/daily?limit=${limit}`);
     if (!res.ok) throw new Error('Failed to fetch reports');
+    return res.json();
+  },
+  getDailyReportDetails: async (date) => {
+    const res = await fetch(`/api/reports/daily/${encodeURIComponent(date)}`);
+    if (!res.ok) throw new Error('Failed to fetch report details');
     return res.json();
   },
   generateReport: async () => {

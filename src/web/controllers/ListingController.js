@@ -1,7 +1,5 @@
-const path = require("node:path");
 const DataService = require("../services/dataService");
 const AIService = require("../../services/aiService");
-const ASSETS_DIR = path.join(__dirname, "../../../assets");
 
 class ListingController {
 	static async getListings(_req, res) {
@@ -10,6 +8,35 @@ class ListingController {
 			res.json(data);
 		} catch (_err) {
 			res.status(500).json({ error: "Failed to load listings" });
+		}
+	}
+
+	static async getPhotoHealth(_req, res) {
+		try {
+			const data = DataService.getPhotoHealth();
+			res.json({ success: true, ...data });
+		} catch (err) {
+			res.status(500).json({ error: `Failed to check photos: ${err.message}` });
+		}
+	}
+
+	static async resetFailedListings(_req, res) {
+		try {
+			const result = DataService.resetFailedListings();
+			res.json({ success: true, count: result.changes });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal reset status produk: ${err.message}` });
+		}
+	}
+
+	static async deletePhoto(req, res) {
+		try {
+			const { photo } = req.body || {};
+			if (!photo) return res.status(400).json({ error: "Parameter photo diperlukan" });
+			const result = DataService.deletePhotoIfUnused(photo);
+			res.json({ success: true, ...result });
+		} catch (err) {
+			res.status(500).json({ error: `Failed to delete photo: ${err.message}` });
 		}
 	}
 
@@ -80,6 +107,72 @@ class ListingController {
 		}
 	}
 
+	static async trashListings(req, res) {
+		try {
+			const { ids } = req.body || {};
+			if (!Array.isArray(ids) || ids.length === 0) {
+				return res.status(400).json({ error: "Parameter ids diperlukan" });
+			}
+			const result = DataService.trashListings(ids.map(Number));
+			res.json({ success: true, ...result });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal pindah ke sampah: ${err.message}` });
+		}
+	}
+
+	static async restoreTrash(req, res) {
+		try {
+			const { trashIds } = req.body || {};
+			if (!Array.isArray(trashIds) || trashIds.length === 0) {
+				return res.status(400).json({ error: "Parameter trashIds diperlukan" });
+			}
+			const result = DataService.restoreTrash(trashIds.map(Number));
+			res.json({ success: true, ...result });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal pulihkan: ${err.message}` });
+		}
+	}
+
+	static async listTrash(_req, res) {
+		try {
+			const { limit } = _req.query || {};
+			const items = DataService.listTrash(limit ? Number(limit) : 100);
+			res.json({ success: true, items, count: items.length });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal muat sampah: ${err.message}` });
+		}
+	}
+
+	static async deleteTrashPermanent(req, res) {
+		try {
+			const { trashIds } = req.body || {};
+			if (!Array.isArray(trashIds) || trashIds.length === 0) {
+				return res.status(400).json({ error: "Parameter trashIds diperlukan" });
+			}
+			const result = DataService.deleteTrashPermanent(trashIds.map(Number));
+			res.json({ success: true, ...result });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal hapus permanen: ${err.message}` });
+		}
+	}
+
+	static async listOrphans(_req, res) {
+		try {
+			res.json({ success: true, ...DataService.listOrphanFiles() });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal pindai orphan: ${err.message}` });
+		}
+	}
+
+	static async cleanOrphans(req, res) {
+		try {
+			const { limit } = req.body || {};
+			res.json({ success: true, ...DataService.cleanOrphanFiles(limit || 200) });
+		} catch (err) {
+			res.status(500).json({ error: `Gagal bersih orphan: ${err.message}` });
+		}
+	}
+
 	static async clearAllListingsUrls(_req, res) {
 		try {
 			await DataService.clearAllExistingPostUrls();
@@ -114,7 +207,7 @@ class ListingController {
 		try {
 			res.json({
 				success: true,
-				folderPath: ASSETS_DIR,
+				folderPath: "assets",
 				files: req.files ? req.files.map((f) => f.filename) : [],
 			});
 		} catch (_err) {

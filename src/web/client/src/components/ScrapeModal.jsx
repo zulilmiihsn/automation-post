@@ -42,18 +42,18 @@ export default function ScrapeModal({
         {/* Embedded Mini Console for Scrape */}
         {(isScraping || scrapeLogs.length > 0) && (
           <div style={{ marginBottom: '24px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
-            <div style={{ padding: '8px 16px', background: 'rgba(0,0,0,0.2)', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ padding: '8px 16px', background: 'var(--surface-tint)', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Activity size={12} /> SCRAPE TERMINAL
             </div>
             <div 
               ref={scrapeTermRef}
-              style={{ height: '140px', background: '#07070b', padding: '12px 16px', overflowY: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem', lineHeight: 1.5 }}
+              style={{ height: '140px', background: 'var(--terminal-bg)', padding: '12px 16px', overflowY: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.8rem', lineHeight: 1.5 }}
             >
               {scrapeLogs.map((log, idx) => {
-                let color = '#a1a1aa';
-                if (log.type === 'error') color = '#ef4444';
-                else if (log.type === 'success') color = '#10b981';
-                else if (log.type === 'system') color = '#3b82f6';
+                let color = 'var(--terminal-system)';
+                if (log.type === 'error') color = 'var(--terminal-error)';
+                else if (log.type === 'success') color = 'var(--success)';
+                else if (log.type === 'system') color = 'var(--info-strong)';
                 return <div key={idx} style={{ color, marginBottom: '4px' }}>{log.msg}</div>
               })}
               {isScraping && (

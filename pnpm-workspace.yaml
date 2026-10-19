@@ -1,3 +1,8 @@
 allowBuilds:
   better-sqlite3: true
   unrs-resolver: true
+overrides:
+  "brace-expansion@^1.1.7": ^1.1.18
+  body-parser: ^2.3.0
+  ip-address: ^10.3.1
+  qs: ^6.16.0

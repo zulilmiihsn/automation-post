@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, ArrowLeft, Bot, MapPin, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Bot, MapPin } from 'lucide-react';
 import { api } from '../services/api';
 import { useAutoSave, SaveStatus } from '../hooks/useAutoSave';
 import { useToast } from '../components/ToastContext';
@@ -114,7 +114,7 @@ export default function ListingsEdit({ listing: initialListing, onBack, onSave }
     return () => {
       window.removeEventListener('paste', handlePaste);
     };
-  }, [listing]);
+  }, [listing, toast]);
 
   const handleChange = (field, value) => {
     const updated = { ...listing, [field]: value };
@@ -187,8 +187,7 @@ export default function ListingsEdit({ listing: initialListing, onBack, onSave }
     }
   };
 
-  const handleFileUpload = async (e) => {
-    const files = e.target.files;
+  const handleFileUpload = async (e) => {    const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setUploading(true);
@@ -200,11 +199,12 @@ export default function ListingsEdit({ listing: initialListing, onBack, onSave }
     try {
       const data = await api.uploadPhotos(formData);
       const newPhotos = data.files.map((f) => `/assets/${f}`);
+      const existingPhotos = Array.isArray(listing.photos) ? listing.photos : [];
       
       const updatedListing = {
         ...listing,
         photoDir: data.folderPath,
-        photos: newPhotos
+        photos: [...existingPhotos, ...newPhotos]
       };
       
       setListing(updatedListing);
@@ -223,6 +223,37 @@ export default function ListingsEdit({ listing: initialListing, onBack, onSave }
     } finally {
       setUploading(false);
       e.target.value = '';
+    }
+  };
+
+  const handleSetCover = async (index) => {
+    const photos = Array.isArray(listing.photos) ? [...listing.photos] : [];
+    if (index <= 0 || index >= photos.length) return;
+    const [picked] = photos.splice(index, 1);
+    photos.unshift(picked);
+    const updated = { ...listing, photos };
+    setListing(updated);
+    if (updated.id) {
+      try { await api.updateListing(updated.id, updated); }
+      catch (err) { toast.error(`Gagal simpan cover: ${err.message}`); }
+    } else {
+      triggerSave(updated);
+    }
+  };
+
+  const handleDeletePhoto = async (index) => {
+    const photos = Array.isArray(listing.photos) ? [...listing.photos] : [];
+    if (index < 0 || index >= photos.length) return;
+    const [removed] = photos.splice(index, 1);
+    const updated = { ...listing, photos };
+    setListing(updated);
+    try {
+      if (removed) await api.deletePhoto(removed).catch(() => {});
+      if (updated.id) await api.updateListing(updated.id, updated);
+      else triggerSave(updated);
+      toast.success("1 foto dihapus");
+    } catch (err) {
+      toast.error(`Gagal hapus foto: ${err.message}`);
     }
   };
 
@@ -326,7 +357,9 @@ export default function ListingsEdit({ listing: initialListing, onBack, onSave }
             listing={listing} 
             isVehicle={isVehicle} 
             uploading={uploading} 
-            onFileUpload={handleFileUpload} 
+            onFileUpload={handleFileUpload}
+            onSetCover={handleSetCover}
+            onDeletePhoto={handleDeletePhoto}
           />
           
           {/* PRIMARY DETAILS */}

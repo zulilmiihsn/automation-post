@@ -29,8 +29,11 @@ class RateLimiter {
 			chat: 30,
 		};
 
-		// Backoff multipliers per account (reset on process restart)
+		// Backoff multipliers per account (persisted ke config agar survive restart)
 		this._backoff = new Map(); // accountId -> multiplier
+		this._backoffTs = new Map(); // accountId -> timestamp ms
+		this._globalPauseUntil = 0;
+		this._restore();
 
 		// Warning keywords that trigger backoff
 		this._warningPatterns = [
@@ -110,6 +113,8 @@ class RateLimiter {
 			const current = this._backoff.get(accountId) || 1;
 			const next = Math.min(current * 3, 27); // Max 27x backoff (aggressive)
 			this._backoff.set(accountId, next);
+			this._backoffTs.set(accountId, Date.now());
+			this._persist();
 			this.logger.warn(`Progressive backoff for ${accountId}: x${next} (detected: "${message.substring(0, 60)}")`);
 			DataService.addHealthEvent("rate_limiter", "fb_warning", `${accountId}: ${message.substring(0, 100)}`, "warn");
 
@@ -128,10 +133,21 @@ class RateLimiter {
 
 	triggerGlobalPause(ms) {
 		this._globalPauseUntil = Date.now() + ms;
+		this._persist();
 	}
 
 	isGlobalPaused() {
-		return this._globalPauseUntil && Date.now() < this._globalPauseUntil;
+		if (this._globalPauseUntil && Date.now() < this._globalPauseUntil) return true;
+		// Fallback baca DB bila memory kosong (fresh restart)
+		try {
+			const cfg = DataService.getAppConfig();
+			const until = Number(cfg.rate_global_pause_until || 0);
+			if (until && Date.now() < until) {
+				this._globalPauseUntil = until;
+				return true;
+			}
+		} catch (_e) {}
+		return false;
 	}
 
 	/**
@@ -140,6 +156,40 @@ class RateLimiter {
 	 */
 	resetBackoff(accountId) {
 		this._backoff.delete(accountId);
+		this._backoffTs.delete(accountId);
+		this._persist();
+	}
+
+	_persist() {
+		try {
+			const obj = {};
+			for (const [k, v] of this._backoff.entries()) {
+				obj[k] = { level: v, ts: this._backoffTs.get(k) || Date.now() };
+			}
+			DataService.setAppConfig("rate_backoff_v1", JSON.stringify(obj));
+			DataService.setAppConfig("rate_global_pause_until", String(this._globalPauseUntil || 0));
+		} catch (_e) {}
+	}
+
+	_restore() {
+		try {
+			const cfg = DataService.getAppConfig();
+			const raw = cfg.rate_backoff_v1;
+			if (raw) {
+				const obj = JSON.parse(raw);
+				const now = Date.now();
+				const TTL = 24 * 3600 * 1000;
+				for (const [k, v] of Object.entries(obj)) {
+					const level = Number(v?.level || v);
+					const ts = Number(v?.ts || 0);
+					if (!level || level <= 1) continue;
+					if (ts && now - ts > TTL) continue; // kadaluarsa 24 jam
+					this._backoff.set(k, level);
+					if (ts) this._backoffTs.set(k, ts);
+				}
+			}
+			this._globalPauseUntil = Number(cfg.rate_global_pause_until || 0);
+		} catch (_e) {}
 	}
 
 	/**

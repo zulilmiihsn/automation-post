@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
  * useAutoSave - runs saveFn after `delay` ms of no new calls.
  * Returns { triggerSave, status } where status is 'idle' | 'saving' | 'saved' | 'error'.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAutoSave(saveFn, delay = 800) {
   const timer = useRef(null);
   const [status, setStatus] = useState('idle');

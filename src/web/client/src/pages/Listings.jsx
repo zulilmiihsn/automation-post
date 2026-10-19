@@ -1,12 +1,19 @@
-import { Image, Edit2, Trash2, Plus, ScanSearch, Play, Square as SquareIcon, Terminal as TerminalIcon, X, Check, Bot, Layers, Package } from 'lucide-react';
+import { Image, Edit2, Trash2, Plus, ScanSearch, Play, Square as SquareIcon, Terminal as TerminalIcon, X, Check, Layers, Package } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ListingsEdit from './ListingsEdit';
 import { useAutoSave, SaveStatus } from '../hooks/useAutoSave';
 import ScrapeModal from '../components/ScrapeModal';
 import CommentModal from '../components/CommentModal';
-import ConsoleModal from '../components/ConsoleModal';
 import { api } from '../services/api';
 import styles from './Listings.module.css';
+import ListingThumb from '../components/ListingThumb';
+import ListingTitle from '../components/ListingTitle';
+import UndoBar from '../components/UndoBar';
+import TrashModal from '../components/TrashModal';
+import OrphanPanel from '../components/OrphanPanel';
+import { useListingFilter } from '../hooks/useListingFilter';
+import { useTrashUndo } from '../hooks/useTrashUndo';
+import { usePager, Pager } from '../hooks/usePager';
 import { useToast } from '../components/ToastContext';
 import { useConfirm } from '../components/ConfirmContext';
 
@@ -22,7 +29,6 @@ export default function Listings({
   const [scrapeUrl, setScrapeUrl] = useState("");
   const [showScrapeModal, setShowScrapeModal] = useState(false);
   const [showCatalogModal, setShowCatalogModal] = useState(false);
-  const [showConsoleModal, setShowConsoleModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeLogs, setScrapeLogs] = useState([]);
@@ -36,19 +42,19 @@ export default function Listings({
   const [isRunningSundul, setIsRunningSundul] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
+  const [photoHealth, setPhotoHealth] = useState(null);
+  const [showTrash, setShowTrash] = useState(false);
+  const { trash, doTrash, undo, dismiss } = useTrashUndo(onRefresh, toast);
+
+  useEffect(() => {
+    let alive = true;
+    api.getPhotoHealth().then((d) => { if (alive) setPhotoHealth(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [targetCommentUrl, setTargetCommentUrl] = useState("");
   const [commentAccountId, setCommentAccountId] = useState("");
-  const [logs, setLogs] = useState([]);
-  const eventSourceRef = useRef(null);
-  const termRef = useRef(null);
   const scrapeTermRef = useRef(null);
-
-  useEffect(() => {
-    if (termRef.current) {
-      termRef.current.scrollTop = termRef.current.scrollHeight;
-    }
-  }, [logs, showConsoleModal]);
 
   useEffect(() => {
     if (scrapeTermRef.current) {
@@ -66,25 +72,10 @@ export default function Listings({
       }
 
       es = new EventSource('/api/stream-logs?mode=all');
-      eventSourceRef.current = es;
-
       es.onmessage = (event) => {
         const streamData = JSON.parse(event.data);
 
         if (streamData.msg) {
-          let type = 'info';
-          if (streamData.msg.includes("[ERROR]") || streamData.msg.includes("ERROR:")) type = 'error';
-          else if (streamData.msg.includes("[WARN]") || streamData.msg.includes("WARN:")) type = 'warn';
-          else if (streamData.msg.includes("[SUCCESS]") || streamData.msg.includes("Berhasil")) type = 'success';
-          else if (streamData.msg.includes(">>>") || streamData.msg.includes("<<<") || streamData.msg.includes("SYSTEM:") || streamData.msg.includes("[SYSTEM]")) type = 'system';
-
-          setLogs(prev => {
-            // Avoid adding identical message within a short window to prevent duplicates
-            const alreadyExists = prev.some(l => l.msg === streamData.msg && Math.abs(new Date().getTime() - new Date().getTime()) < 100);
-            if (alreadyExists) return prev;
-            return [...prev, { type, msg: streamData.msg, time: new Date().toLocaleTimeString() }];
-          });
-
           // Parallel UI refresh triggers
           if (streamData.msg.includes("[REFRESH_UI]")) {
             onRefresh();
@@ -139,8 +130,7 @@ export default function Listings({
 
     if (!(await confirm(`Jalankan otomatisasi ${modeLabel} sekarang?`))) return;
 
-    setShowConsoleModal(true); // Auto-open console
-    setLogs(prev => [...prev, { type: 'system', msg: `>>> Menghubungkan ke Bot Engine (${mode})... <<<`, time: new Date().toLocaleTimeString() }]);
+    window.dispatchEvent(new Event('autopost:open-console'));
 
     try {
       const res = await fetch("/api/run-automation", {
@@ -152,9 +142,8 @@ export default function Listings({
 
       if (!res.ok) throw new Error(data.message || "Gagal memulai otomatisasi");
 
-      setLogs(prev => [...prev, { type: 'success', msg: `Bot Engine: ${data.message}`, time: new Date().toLocaleTimeString() }]);
     } catch (err) {
-      setLogs(prev => [...prev, { type: 'error', msg: `Gagal: ${err.message}`, time: new Date().toLocaleTimeString() }]);
+      toast.error(`Gagal: ${err.message}`);
     }
   };
 
@@ -166,9 +155,24 @@ export default function Listings({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
       });
-      setLogs(prev => [...prev, { type: 'system', msg: "<<< Mengirim sinyal berhenti ke Bot Engine... >>>", time: new Date().toLocaleTimeString() }]);
     } catch (err) {
-      console.error(err);
+      toast.error(`Gagal menghentikan bot: ${err.message}`);
+    }
+  };
+
+  const runningModes = [isRunningMp && 'Post', isRunningSundul && 'Sundul', isRunningViral && 'Viral', isRunningComment && 'Komentar', isRunningChat && 'Chat', isRunningAgent && 'Agent'].filter(Boolean);
+
+  const stopAllBots = async () => {
+    if (runningModes.length === 0) return;
+    if (!(await confirm(`Hentikan SEMUA bot (${runningModes.join(', ')})?`))) return;
+    try {
+      await fetch("/api/stop-automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    } catch (err) {
+      toast.error(`Gagal menghentikan bot: ${err.message}`);
     }
   };
 
@@ -183,14 +187,19 @@ export default function Listings({
     }).format(number).replace(/,00$/, "");
   };
 
-  const deleteListing = async (index) => {
-    if (!(await confirm("Hapus produk ini?"))) return;
-    const item = listings[index];
+  const deleteListing = async (item) => {
+    if (!item || !item.id) return;
+    const photoCount = Array.isArray(item.photos) ? item.photos.length : 0;
+    const ok = await confirm(
+      `Pindah "${item.title || 'produk ini'}" (ID ${item.id}, ${photoCount} foto) ke sampah? Bisa diurungkan 10 detik. File foto tetap aman.`,
+    );
+    if (!ok) return;
     try {
-      await fetch(`/api/listings/${item.id}`, { method: "DELETE" });
-      onRefresh();
+      await doTrash([item.id], item.title || `ID ${item.id}`);
+      setSelectedIds((prev) => prev.filter((x) => x !== item.id));
     } catch (err) {
       console.error(err);
+      toast.error("Gagal menghapus produk: " + err.message);
     }
   };
 
@@ -208,13 +217,12 @@ export default function Listings({
 
   const deleteAllSelected = async () => {
     if (selectedIds.length === 0) return;
-    if (!(await confirm(`Hapus ${selectedIds.length} produk terpilih?`))) return;
-    
+    if (!(await confirm(`Pindah ${selectedIds.length} produk terpilih ke sampah? Bisa diurungkan 10 detik.`))) return;
+
     try {
-      await api.bulkDeleteListings(selectedIds);
+      const ids = [...selectedIds];
+      await doTrash(ids, `${ids.length} produk`);
       setSelectedIds([]);
-      toast.success(`${selectedIds.length} produk berhasil dihapus`);
-      onRefresh();
     } catch (err) {
       console.error(err);
       toast.error("Gagal hapus massal: " + err.message);
@@ -286,14 +294,12 @@ export default function Listings({
     
     if (!(await confirm(`Pindai Facebook dan sundul hanya listing yang eligible? ${activeIds.length} listing lokal aktif dipakai sebagai indikator kesiapan.`))) return;
 
-    setShowConsoleModal(true);
-    setLogs(prev => [...prev, { type: 'system', msg: `>>> Memulai Bot Sundul... <<<`, time: new Date().toLocaleTimeString() }]);
+    window.dispatchEvent(new Event('autopost:open-console'));
 
     try {
-      const res = await api.runSundul({ autoMode: true });
-      setLogs(prev => [...prev, { type: 'success', msg: `Bot Sundul: ${res.message}`, time: new Date().toLocaleTimeString() }]);
+      await api.runSundul({ autoMode: true });
     } catch (err) {
-      setLogs(prev => [...prev, { type: 'error', msg: `Gagal Sundul Auto: ${err.message}`, time: new Date().toLocaleTimeString() }]);
+      toast.error(`Gagal Sundul Auto: ${err.message}`);
     }
   };
 
@@ -354,16 +360,20 @@ export default function Listings({
   };
 
   const activeGroup = selectedGroupId ? groups.find(g => g.id === Number(selectedGroupId)) : null;
-  const filteredListings = activeGroup
+  const groupBase = activeGroup
     ? listings.filter(l => activeGroup.listings.includes(l.id))
     : listings;
+  const { query, setQuery, sort, setSort, photoFilter, setPhotoFilter, result: filteredListings } = useListingFilter(groupBase, 'listings');
+  const { page, setPage, pages, total, slice: pageSlice } = usePager(filteredListings, 24, 'listings');
+
+  useEffect(() => { setPage(1); }, [query, sort, photoFilter, setPage]);
   const groupAccounts = activeGroup
     ? accounts.filter(a => activeGroup.accounts.includes(a.id))
     : accounts;
 
   const activeAccountsCount = groupAccounts ? groupAccounts.filter(a => a.isActive && a.linked).length : 0;
-  const activeMpListingsCount = filteredListings.filter(l => l.postMarketplace !== false && l.isActive !== false).length;
-  const activeViralListingsCount = filteredListings.filter(l => l.autoFeed === true && l.isActive !== false).length;
+  const activeMpListingsCount = groupBase.filter(l => l.postMarketplace !== false && l.isActive !== false).length;
+  const activeViralListingsCount = groupBase.filter(l => l.autoFeed === true && l.isActive !== false).length;
 
   if (editingItem) {
     return (
@@ -374,7 +384,9 @@ export default function Listings({
           if (saved && selectedGroupId && saved.id) {
             try {
               await api.addGroupListing(selectedGroupId, saved.id);
-            } catch (_) {}
+             } catch (error) {
+               console.error('Gagal menautkan listing ke grup:', error);
+             }
           }
           setEditingItem(null);
           onRefresh();
@@ -421,13 +433,13 @@ export default function Listings({
         <div className={styles.activeGroupBanner}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div className={styles.groupBadgeIcon}>
-              <Layers size={20} color="#10B981" />
+              <Layers size={20} color="var(--success)" />
             </div>
             <div>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: '#FAFAFA' }}>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>
                 Fokus Grup: {activeGroup.name}
               </div>
-              <div style={{ fontSize: '13px', color: '#A1A1AA', marginTop: '2px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
                 {activeGroup.accounts.length} Akun Tertaut &bull; {filteredListings.length} Produk di Grup Ini
               </div>
             </div>
@@ -500,6 +512,11 @@ export default function Listings({
               {(isRunningMp || isRunningViral || isRunningAgent) ? 'Berjalan Aktif' : 'Sistem Idle'}
             </span>
           </div>
+          {runningModes.length > 0 && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+              Aktif: {runningModes.join(' • ')} — {activeMpListingsCount + activeViralListingsCount} antre siap / {filteredListings.length} tampil
+            </div>
+          )}
         </div>
 
         <div className={styles.bentoStatsGroup}>
@@ -520,7 +537,7 @@ export default function Listings({
         <div className={styles.bentoActions}>
           <button 
             className="btn btn-primary"
-            onClick={() => setShowConsoleModal(true)}
+            onClick={() => window.dispatchEvent(new Event('autopost:open-console'))}
           >
             <TerminalIcon size={14} /> Konsol
           </button>
@@ -564,14 +581,60 @@ export default function Listings({
               <Play size={14} fill="currentColor" /> Jalankan Komentar
             </button>
           )}
+          {runningModes.length > 0 && (
+            <button className="btn btn-danger" onClick={stopAllBots} title={`Hentikan: ${runningModes.join(', ')}`}>
+              <SquareIcon size={14} fill="currentColor" /> Stop Semua ({runningModes.length})
+            </button>
+          )}
         </div>
       </div>
 
       {/* LISTINGS GRID HEADER */}
+      {photoHealth && photoHealth.missingCount > 0 ? (
+        <div className={styles.healthBanner}>
+          <span>{photoHealth.missingCount} foto hilang di disk dari {photoHealth.totalRefs} referensi. Klik Perbaiki di kartu.</span>
+          <button className="btn btn-danger" onClick={() => api.getPhotoHealth().then(setPhotoHealth).catch(() => {})}>Cek Ulang</button>
+        </div>
+      ) : photoHealth ? (
+        <div className={styles.healthBannerOk}>
+          <span>Foto aman: {photoHealth.totalRefs} referensi, {photoHealth.diskAssets} file di assets.</span>
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Cari judul / deskripsi / kategori..."
+          aria-label="Cari produk"
+          style={{ flex: '1 1 220px', minWidth: 180 }}
+        />
+        <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Urutkan produk" style={{ flex: '0 1 170px' }}>
+          <option value="newest">Terbaru</option>
+          <option value="priceAsc">Harga terendah</option>
+          <option value="priceDesc">Harga tertinggi</option>
+          <option value="title">Judul A-Z</option>
+        </select>
+        <select value={photoFilter} onChange={(e) => setPhotoFilter(e.target.value)} aria-label="Filter foto" style={{ flex: '0 1 150px' }}>
+          <option value="all">Semua foto</option>
+          <option value="has">Ada foto</option>
+          <option value="missing">Tanpa foto</option>
+        </select>
+        <button className="btn btn-outline" onClick={() => setShowTrash(true)} style={{ fontSize: 12 }}>
+          Sampah
+        </button>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <OrphanPanel onChanged={() => { onRefresh(); api.getPhotoHealth().then(setPhotoHealth).catch(() => {}); }} />
+      </div>
       <div className={styles.gridHeader}>
-        <div 
+        <div
           onClick={selectAll}
           className={styles.selectAllWrapper}
+          role="checkbox"
+          aria-checked={filteredListings.length > 0 && selectedIds.length === filteredListings.length}
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectAll(); } }}
         >
           <div className={`${styles.customCheckbox} ${(filteredListings.length > 0 && selectedIds.length === filteredListings.length) ? styles.customCheckboxChecked : ''}`}>
             {(filteredListings.length > 0 && selectedIds.length === filteredListings.length) && <Check size={14} color="#000" strokeWidth={3} />}
@@ -587,10 +650,10 @@ export default function Listings({
         {filteredListings.length === 0 ? (
           <div className={styles.emptyGroupCard}>
             <Package size={44} color="#52525B" strokeWidth={1.5} />
-            <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#FAFAFA', margin: '16px 0 6px 0' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', margin: '16px 0 6px 0' }}>
               {activeGroup ? `Belum Ada Produk di Grup "${activeGroup.name}"` : 'Belum Ada Produk'}
             </h3>
-            <p style={{ fontSize: '14px', color: '#A1A1AA', maxWidth: '440px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)', maxWidth: '440px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
               {activeGroup 
                 ? 'Tambahkan produk baru ke grup ini atau pilih produk dari katalog utama untuk dimasukkan ke grup.'
                 : 'Mulai dengan menambahkan produk secara manual atau gunakan fitur Scrape FB.'}
@@ -623,21 +686,13 @@ export default function Listings({
             </div>
           </div>
         ) : (
-          filteredListings.map((item, index) => {
-            let firstPhoto = item.photos && item.photos.length > 0 ? item.photos[0] : null;
-            if (firstPhoto && !firstPhoto.startsWith("/")) firstPhoto = `/${firstPhoto}`;
+          pageSlice.map((item, index) => {
+            const noPhoto = !item.photos || item.photos.length === 0;
             
             return (
               <div key={item.id || index} className={`item-card ${styles.itemCard}`}>
                 <div className={styles.imageWrapper}>
-                  {firstPhoto ? (
-                    <img src={firstPhoto} className={styles.firstImage} alt="Product" />
-                  ) : (
-                    <div className={styles.noImageWrapper}>
-                      <Image size={32} style={{ marginBottom: '8px', opacity: 0.5 }} />
-                      <span className={styles.noImageText}>Tanpa Gambar</span>
-                    </div>
-                  )}
+                  <ListingThumb photos={item.photos} title={item.title} onFix={() => setEditingItem(item)} />
                   
                   <div 
                     onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
@@ -647,9 +702,12 @@ export default function Listings({
                   </div>
                 </div>
                 
-                <h3 className={styles.itemTitle}>
-                  {item.title || "Produk Tanpa Judul"}
-                </h3>
+                <ListingTitle text={item.title} />
+                {noPhoto && (
+                  <div className={styles.flagRow}>
+                    <span className={styles.flagPhoto}>TANPA FOTO</span>
+                  </div>
+                )}
                 
                 <div className={styles.itemToggles}>
                   <ListingToggle item={item} type="mp" />
@@ -676,7 +734,7 @@ export default function Listings({
                     <Edit2 size={14} /> 
                     <span>Edit Data</span>
                   </button>
-                  <button className={`btn btn-danger ${styles.btnDelete}`} onClick={() => deleteListing(index)}>
+                  <button className={`btn btn-danger ${styles.btnDelete}`} onClick={() => deleteListing(item)} aria-label={`Hapus ${item.title || 'produk'}`} title="Hapus produk">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -713,21 +771,7 @@ export default function Listings({
         }}
       />
 
-      {/* MODAL: BOT CONSOLE */}
-      <ConsoleModal
-        show={showConsoleModal}
-        onClose={() => setShowConsoleModal(false)}
-        logs={logs}
-        onClearLogs={() => setLogs([])}
-        isRunningMp={isRunningMp}
-        isRunningViral={isRunningViral}
-        isRunningComment={isRunningComment}
-        isRunningSundul={isRunningSundul}
-        isRunningChat={isRunningChat}
-        isRunningAgent={isRunningAgent}
-        isRunningScraper={isScraping}
-        termRef={termRef}
-      />
+      <Pager page={page} pages={pages} total={total} onPage={setPage} />
 
       {/* FLOATING BULK ACTIONS BAR */}
       {selectedIds.length > 0 && (
@@ -813,16 +857,18 @@ export default function Listings({
           </div>
         </div>
       )}
+      <UndoBar trash={trash} onUndo={undo} onDismiss={dismiss} />
+      <TrashModal show={showTrash} onClose={() => setShowTrash(false)} onChanged={onRefresh} />
       {/* MODAL: PILIH DARI KATALOG */}
       {showCatalogModal && activeGroup && (
         <div className="modal-overlay" style={{ zIndex: 1100 }}>
           <div className="modal-content" style={{ maxWidth: '680px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: '24px', borderRadius: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#FAFAFA', margin: 0 }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', margin: 0 }}>
                   Pilih Produk untuk "{activeGroup.name}"
                 </h3>
-                <p style={{ fontSize: '13px', color: '#A1A1AA', margin: '4px 0 0 0' }}>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
                   Centang produk dari katalog untuk dimasukkan atau dikeluarkan dari grup ini.
                 </p>
               </div>
@@ -862,8 +908,8 @@ export default function Listings({
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '12px 16px',
-                        background: isAssigned ? 'rgba(16, 185, 129, 0.08)' : '#18181B',
-                        border: `1px solid ${isAssigned ? 'rgba(16, 185, 129, 0.3)' : '#27272A'}`,
+                        background: isAssigned ? 'rgba(16, 185, 129, 0.08)' : 'var(--card-hover)',
+                        border: `1px solid ${isAssigned ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}`,
                         borderRadius: '12px',
                         cursor: 'pointer',
                         transition: 'all 0.15s'
@@ -872,26 +918,26 @@ export default function Listings({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{
                           width: '20px', height: '20px', borderRadius: '5px',
-                          border: `2px solid ${isAssigned ? '#10B981' : '#52525B'}`,
+                          border: `2px solid ${isAssigned ? 'var(--success)' : 'var(--border-light)'}`,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          background: isAssigned ? '#10B981' : 'transparent'
+                          background: isAssigned ? 'var(--success)' : 'transparent'
                         }}>
-                          {isAssigned && <Check size={12} color="#000" strokeWidth={3} />}
+                          {isAssigned && <Check size={12} color="var(--success-contrast)" strokeWidth={3} />}
                         </div>
                         {thumb ? (
                           <img src={thumb} style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} alt="" />
                         ) : (
-                          <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#27272A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Image size={18} color="#71717A" />
+                          <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'var(--card-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Image size={18} color="var(--text-muted)" />
                           </div>
                         )}
                         <div>
-                          <div style={{ fontSize: '14px', fontWeight: 500, color: '#FAFAFA' }}>{l.title}</div>
-                          <div style={{ fontSize: '12px', color: '#A1A1AA' }}>{formatRupiah(l.price)} &bull; {l.category || 'Lain-lain'}</div>
+                          <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)' }}>{l.title}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{formatRupiah(l.price)} &bull; {l.category || 'Lain-lain'}</div>
                         </div>
                       </div>
                       
-                      <div style={{ fontSize: '12px', fontWeight: 600, color: isAssigned ? '#10B981' : '#71717A' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: isAssigned ? 'var(--success)' : 'var(--text-muted)' }}>
                         {isAssigned ? 'Terpilih' : 'Klik untuk Pilih'}
                       </div>
                     </div>
@@ -900,7 +946,7 @@ export default function Listings({
               )}
             </div>
 
-            <div style={{ paddingTop: '16px', borderTop: '1px solid #27272A', display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ paddingTop: '16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btn-primary" onClick={() => setShowCatalogModal(false)}>
                 Selesai
               </button>
@@ -915,11 +961,8 @@ export default function Listings({
 function ListingToggle({ item, type }) {
   const field = type === 'mp' ? 'postMarketplace' : 'autoFeed';
   const defaultValue = type === 'mp' ? item.postMarketplace !== false : !!item.autoFeed;
-  const [active, setActive] = useState(defaultValue);
-  
-  useEffect(() => {
-    setActive(defaultValue);
-  }, [defaultValue]);
+  const [override, setOverride] = useState(null);
+  const active = override?.source === defaultValue ? override.value : defaultValue;
 
   const saveFn = useCallback(
     (val) => fetch(`/api/listings/${item.id}`, {
@@ -927,7 +970,7 @@ function ListingToggle({ item, type }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...item, [field]: val }),
     }),
-    [item.id, field, item]
+    [field, item]
   );
   const { triggerSave, status } = useAutoSave(saveFn, 0);
 
@@ -936,13 +979,13 @@ function ListingToggle({ item, type }) {
       className={active ? styles.premiumToggleActive : styles.premiumToggle}
       onClick={() => {
         const newState = !active;
-        setActive(newState);
+        setOverride({ source: defaultValue, value: newState });
         triggerSave(newState);
       }}
     >
       <div className={active ? styles.toggleDotActive : styles.toggleDot}></div>
-      <span className={active ? styles.toggleTextActive : styles.toggleText}>
-        {type === 'mp' ? 'MARKETPLACE' : 'VIRAL SHARE'}
+      <span className={active ? styles.toggleTextActive : styles.toggleText} title={type === 'mp' ? 'Tampil di Toko Facebook' : 'Bagikan otomatis ke grup'}>
+        {type === 'mp' ? 'TOKO' : 'GRUP'}
       </span>
       {status !== 'idle' && <SaveStatus status={status} />}
     </div>

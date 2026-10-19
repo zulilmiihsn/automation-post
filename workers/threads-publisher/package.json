@@ -1,0 +1,18 @@
+{
+  "name": "threads-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Threads API publisher on Cloudflare free tier (Workers + D1 + R2 + Cron). Terpisah dari automasi FB lokal.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create threads-publisher",
+    "db:migrate": "wrangler d1 migrations apply threads-publisher",
+    "secret:app-id": "wrangler secret put THREADS_APP_ID",
+    "secret:app-secret": "wrangler secret put THREADS_APP_SECRET",
+    "secret:publisher": "wrangler secret put PUBLISHER_SECRET"
+  },
+  "devDependencies": {
+    "wrangler": "^4.107.1"
+  }
+}

@@ -2,6 +2,8 @@ const path = require("node:path");
 const fs = require("fs-extra");
 const crypto = require("node:crypto");
 const Logger = require("../utils/logger");
+const { resolveAssetPath } = require("../utils/assetFiles");
+const { detectImageType, isValidImageBuffer } = require("../utils/imageTypes");
 
 class InteractionEngine {
 	constructor(page, accountName = "BOT") {
@@ -124,12 +126,7 @@ class InteractionEngine {
 		return photos
 			.map((p) => {
 				if (!p) return null;
-				// Clean leading slash if any
-				const cleanPath = p.startsWith("/") ? p.substring(1) : p;
-				const fullPath = path.isAbsolute(cleanPath)
-					? cleanPath
-					: path.join(process.cwd(), cleanPath);
-				return fs.existsSync(fullPath) ? fullPath : null;
+				return resolveAssetPath(String(p), { mustExist: true });
 			})
 			.filter((p) => p !== null);
 	}
@@ -139,10 +136,32 @@ class InteractionEngine {
 	 */
 	async downloadImage(url, subfolder = "scraped") {
 		try {
-			const response = await this.page.request.get(url);
+			const imageUrl = new URL(url);
+			const hostname = imageUrl.hostname.toLowerCase();
+			const isFacebookImageHost = hostname.endsWith(".fbcdn.net") || hostname.endsWith(".fbsbx.com");
+			if (
+				imageUrl.protocol !== "https:" || !isFacebookImageHost ||
+				imageUrl.username || imageUrl.password || imageUrl.port || subfolder !== "scraped"
+			) {
+				throw new Error("URL gambar tidak diizinkan");
+			}
+
+			const response = await this.page.request.get(imageUrl.href, { timeout: 10000, maxRedirects: 0 });
 			if (!response.ok()) throw new Error(`HTTP ${response.status()}`);
+			const finalUrl = new URL(response.url());
+			if (!finalUrl.hostname.toLowerCase().endsWith(".fbcdn.net") && !finalUrl.hostname.toLowerCase().endsWith(".fbsbx.com")) {
+				throw new Error("Redirect gambar keluar dari domain Facebook");
+			}
+			const headers = response.headers();
+			const contentType = String(headers["content-type"] || "").split(";")[0].toLowerCase();
+			const contentLength = Number(headers["content-length"] || 0);
+			if (contentLength > 10 * 1024 * 1024) throw new Error("Ukuran gambar melewati batas 10 MB");
 
 			const buffer = await response.body();
+			if (buffer.length > 10 * 1024 * 1024 || !isValidImageBuffer(buffer, contentType)) {
+				throw new Error("Isi respons bukan gambar valid");
+			}
+			const imageType = detectImageType(buffer);
 			const hash = crypto
 				.createHash("sha256")
 				.update(url)
@@ -152,7 +171,7 @@ class InteractionEngine {
 				.toISOString()
 				.replace(/[:.]/g, "-")
 				.slice(0, 19);
-			const filename = `img_${timestamp}_${hash}.jpg`;
+			const filename = `img_${timestamp}_${hash}${imageType.extension}`;
 			const filePath = path.join(process.cwd(), "assets", subfolder, filename);
 
 			await fs.ensureDir(path.dirname(filePath));
@@ -237,18 +256,42 @@ class InteractionEngine {
 		});
 	}
 
-	async smartClick(selectors) {
-		for (const sel of selectors) {
+	async smartClick(selectors, key = "unknown") {
+		const Health = require("./selectorHealth");
+		for (let idx = 0; idx < selectors.length; idx++) {
+			const sel = selectors[idx];
+			// Tolak class hash FB: .x1n2onr6 gampang jebol, pakai role/aria/teks dulu
+			if (/\.x[a-z0-9]{6,}/i.test(sel)) {
+				this.logger.warn(`Selector rapuh dilewati [${key}]: ${sel.slice(0, 60)}`);
+				continue;
+			}
 			try {
 				const el = this.page.locator(sel).first();
 				if (await el.isVisible({ timeout: 2000 })) {
 					await el.click();
+					Health.record(key, idx, selectors.length);
+					if (idx > 0) this.logger.warn(`Fallback selector dipakai [${key}] idx=${idx}`);
 					return true;
 				}
 			} catch (_e) {
 				/* selector gagal dicoba, lanjut ke selector berikutnya */
 			}
 		}
+		Health.record(key, -1, selectors.length);
+		this.logger.error(`Semua selector gagal [${key}]. Dump HTML untuk self-heal.`);
+		try {
+			const html = await this.page.content().catch(() => "");
+			if (html) {
+				const fs = require("fs-extra");
+				const path = require("node:path");
+				const file = path.join(process.cwd(), "assets/debug", `domfail_${key}_${Date.now()}.html`);
+				await fs.ensureDir(path.dirname(file));
+				await fs.writeFile(file, html.slice(0, 200000));
+			}
+			if (this.page.screenshot) {
+				await this.page.screenshot({ path: `assets/debug/domfail_${key}_${Date.now()}.png` }).catch(() => {});
+			}
+		} catch (_e) {}
 		return false;
 	}
 }

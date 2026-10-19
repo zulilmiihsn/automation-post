@@ -1,0 +1,26 @@
+name = "threads-publisher"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# 100% Cloudflare free tier: Workers + D1 + R2 + Cron, tanpa domain sendiri.
+# URL publik otomatis: https://threads-publisher.<subdomain>.workers.dev
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "threads-publisher"
+database_id = "a1e6f77b-b3bb-4574-9f5c-c407f0b1901d"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "threads-media"
+
+[vars]
+THREADS_API_BASE = "https://graph.threads.net/v1.0"
+THREADS_OAUTH_AUTHORIZE = "https://threads.net/oauth/authorize"
+# Redirect URI wajib sama persis dengan yang didaftarkan di Meta App Dashboard:
+# https://threads-publisher.<subdomain>.workers.dev/auth/callback
+# Jangan taruh secret di sini. Pakai: wrangler secret put THREADS_APP_ID / THREADS_APP_SECRET / PUBLISHER_SECRET

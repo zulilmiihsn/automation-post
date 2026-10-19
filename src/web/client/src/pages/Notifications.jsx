@@ -1,14 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Bell, CheckCheck, AlertTriangle, Info, CheckCircle, XCircle } from 'lucide-react';
 import { api } from '../services/api';
+import { useToast } from '../components/ToastContext';
+import { useConfirm } from '../components/ConfirmContext';
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
+  const confirm = useConfirm();
 
-  const fetchData = async () => {
-    setLoading(true);
+  const notifyChanged = () => window.dispatchEvent(new Event('autopost:notifications-changed'));
+
+  const fetchData = useCallback(async () => {
     try {
       const data = await api.getNotifications({
         unreadOnly: filter === 'unread',
@@ -20,25 +25,47 @@ export default function Notifications() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
-  useEffect(() => { fetchData(); }, [filter]);
+  useEffect(() => {
+    const task = window.setTimeout(fetchData, 0);
+    return () => window.clearTimeout(task);
+  }, [fetchData]);
 
   const markRead = async (id) => {
     try {
       await api.markNotificationRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
+      setNotifications(prev => filter === 'unread'
+        ? prev.filter(n => n.id !== id)
+        : prev.map(n => n.id === id ? { ...n, read: 1, is_read: true } : n));
+      notifyChanged();
     } catch (err) {
       console.error('Mark read error:', err);
+      toast.error(`Gagal menandai notifikasi: ${err.message}`);
     }
   };
 
   const markAllRead = async () => {
     try {
       await api.markAllNotificationsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: 1 })));
+      setNotifications(prev => filter === 'unread' ? [] : prev.map(n => ({ ...n, read: 1, is_read: true })));
+      notifyChanged();
     } catch (err) {
       console.error('Mark all read error:', err);
+      toast.error(`Gagal menandai notifikasi: ${err.message}`);
+    }
+  };
+
+  const clearNotifications = async (readOnly) => {
+    const target = readOnly ? 'notifikasi yang sudah dibaca' : 'semua notifikasi';
+    if (!(await confirm(`Hapus ${target}? Tindakan ini tidak bisa dibatalkan.`))) return;
+    try {
+      const result = await api.clearNotifications({ readOnly });
+      toast.success(`${result.deleted || 0} notifikasi dihapus`);
+      notifyChanged();
+      await fetchData();
+    } catch (err) {
+      toast.error(`Gagal menghapus notifikasi: ${err.message}`);
     }
   };
 
@@ -52,6 +79,7 @@ export default function Notifications() {
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
+  const readCount = notifications.length - unreadCount;
 
   return (
     <div style={{ padding: '0 4px' }}>
@@ -60,16 +88,26 @@ export default function Notifications() {
           <button
             key={f.id}
             className={`btn ${filter === f.id ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setFilter(f.id)}
+            onClick={() => { if (filter !== f.id) { setLoading(true); setFilter(f.id); } }}
             style={{ textTransform: 'capitalize' }}
           >
             {f.label} {f.id === 'unread' && unreadCount > 0 ? `(${unreadCount})` : ''}
           </button>
         ))}
-        <div style={{ marginLeft: 'auto' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {unreadCount > 0 && (
             <button className="btn btn-outline" onClick={markAllRead} style={{ fontSize: '12px', padding: '6px 12px' }}>
               <CheckCheck size={14} style={{ marginRight: '4px' }} /> Tandai Semua Dibaca
+            </button>
+          )}
+          {readCount > 0 && (
+            <button className="btn btn-outline" onClick={() => clearNotifications(true)} style={{ fontSize: '12px', padding: '6px 12px' }}>
+              Hapus Dibaca ({readCount})
+            </button>
+          )}
+          {notifications.length > 0 && (
+            <button className="btn btn-danger" onClick={() => clearNotifications(false)} style={{ fontSize: '12px', padding: '6px 12px' }}>
+              Hapus Semua
             </button>
           )}
         </div>
@@ -83,6 +121,14 @@ export default function Notifications() {
             <div
               key={notif.id}
               onClick={() => !notif.is_read && markRead(notif.id)}
+              role={!notif.is_read ? 'button' : undefined}
+              tabIndex={!notif.is_read ? 0 : undefined}
+              onKeyDown={(event) => {
+                if (!notif.is_read && (event.key === 'Enter' || event.key === ' ')) {
+                  event.preventDefault();
+                  markRead(notif.id);
+                }
+              }}
               style={{
                 padding: '14px 16px',
                 background: notif.is_read ? 'var(--card)' : 'rgba(96,165,250,0.04)',

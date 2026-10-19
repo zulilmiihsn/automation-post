@@ -188,7 +188,9 @@ class ShareService {
 
 					await groupItems.first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
 
-					const matchingGroups = groupItems.filter({ hasText: new RegExp(kw, "i") });
+					const matchingGroups = groupItems
+						.filter({ hasText: new RegExp(kw, "i") })
+						.filter({ hasNotText: /melalui Messenger|via Messenger|^Kirim ke|Send to.*Messenger/i });
 					let matchCount = await matchingGroups.count().catch(() => 0);
 
 					let scrollAttempts = 0;
@@ -199,13 +201,14 @@ class ShareService {
 						// Eksekusi pencarian teks di dalam browser context langsung (blazing fast)
 						const result = await matchingGroups.evaluateAll((els, postedArray) => {
 							const postedSet = new Set(postedArray);
+							const notGroup = /melalui messenger|via messenger|^kirim ke/i;
 							for (let i = 0; i < els.length; i++) {
 								let name = els[i].getAttribute("aria-label");
 								if (!name) name = els[i].innerText || "";
 								name = name.split("\n")[0].trim();
-								if (name && !postedSet.has(name)) {
-									return { index: i, nameClean: name };
-								}
+								if (!name || postedSet.has(name)) continue;
+								if (notGroup.test(name)) continue; // tolak kontak Messenger
+								return { index: i, nameClean: name };
 							}
 							return null;
 						}, Array.from(postedGroupNames));

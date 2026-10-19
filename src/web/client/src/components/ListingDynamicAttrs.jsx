@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function ListingDynamicAttrs({ dynamicAttrs, config, listing, handleAttributeChange }) {
   if (!dynamicAttrs || dynamicAttrs.length === 0) return null;
 

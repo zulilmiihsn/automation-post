@@ -1,5 +1,5 @@
 import { Terminal as TerminalIcon, Trash, X, Search, Filter, Download, Pause, Play, AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react';
 import { api } from '../services/api';
 import { useToast } from './ToastContext';
 import { useConfirm } from './ConfirmContext';
@@ -20,6 +20,7 @@ const MODE_OPTIONS = [
   { value: 'chat', label: 'Chat' },
   { value: 'agent', label: 'AI Agent' },
   { value: 'scraper', label: 'Scraper' },
+  { value: 'sundul', label: 'Sundul' },
 ];
 
 const LEVEL_COLORS = {
@@ -61,10 +62,6 @@ function parseLiveLog(msg) {
   return { level, context, message };
 }
 
-function getLogType(msg) {
-  return parseLiveLog(msg).level;
-}
-
 export default function ConsoleModal({
   show,
   onClose,
@@ -98,14 +95,7 @@ export default function ConsoleModal({
     }
   }, [logs, autoScroll, showHistory]);
 
-  // Load persisted logs when modal opens
-  useEffect(() => {
-    if (show && !showHistory) {
-      loadHistoryLogs();
-    }
-  }, [show, showHistory]);
-
-  const loadHistoryLogs = async () => {
+  const loadHistoryLogs = useCallback(async () => {
     setLoadingHistory(true);
     try {
       const params = { limit: 300 };
@@ -119,7 +109,25 @@ export default function ConsoleModal({
     } finally {
       setLoadingHistory(false);
     }
-  };
+  }, [filterMode, filterLevel, searchText]);
+
+  // Load persisted logs when modal opens.
+  useEffect(() => {
+    if (!show || showHistory) return;
+    const task = window.setTimeout(loadHistoryLogs, 0);
+    return () => window.clearTimeout(task);
+  }, [show, showHistory, loadHistoryLogs]);
+
+  useEffect(() => {
+    if (!show) return;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [show, onClose]);
+
+  useImperativeHandle(termRef, () => scrollRef.current);
 
   const handleClearHistory = async () => {
     if (!(await confirm("Hapus semua log yang tersimpan (lebih dari 7 hari)?"))) return;
@@ -163,6 +171,7 @@ export default function ConsoleModal({
     const msgStr = typeof l === 'string' ? l : (l.msg || l.message || '');
     if (!msgStr && l.type === 'status') return false; // ignore raw status events
     const type = l.type || parseLiveLog(msgStr).level;
+    if (filterMode !== 'all' && !msgStr.toLowerCase().includes(`[${filterMode}]`)) return false;
     if (filterLevel !== 'all' && type !== filterLevel) return false;
     if (searchText && !msgStr.toLowerCase().includes(searchText.toLowerCase())) return false;
     return true;
@@ -177,17 +186,16 @@ export default function ConsoleModal({
 
   if (!show) return null;
 
-  const displayLogs = showHistory ? filteredHistoryLogs : filteredLiveLogs;
   const isAnyRunning = isRunningMp || isRunningViral || isRunningComment || isRunningSundul || isRunningChat || isRunningAgent || isRunningScraper;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', width: '95%', padding: 0, borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '700px' }}>
+      <div role="dialog" aria-modal="true" aria-label="Konsol automasi" className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', width: '95%', padding: 0, borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', height: 'min(700px, 85vh)', maxHeight: '85vh' }}>
         
         {/* Header */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--card)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)', letterSpacing: '0.05em' }}>
-            <TerminalIcon size={16} /> AUTOMATION TERMINAL
+            <TerminalIcon size={16} /> KONSOL GLOBAL
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {/* Tab Toggle: Live / History */}
@@ -300,9 +308,9 @@ export default function ConsoleModal({
 
         {/* Terminal Body */}
         <div 
-          ref={(el) => { scrollRef.current = el; if (termRef) { if (typeof termRef === 'function') termRef(el); else termRef.current = el; } }}
+          ref={scrollRef}
           className="terminal" 
-          style={{ flex: 1, padding: '16px 20px', overflowY: 'auto', background: '#07070b', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: '0.8rem', lineHeight: 1.6 }}
+          style={{ flex: 1, padding: '16px 20px', overflowY: 'auto', background: 'var(--terminal-bg)', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: '0.8rem', lineHeight: 1.6 }}
         >
           {/* Live mode: no logs */}
           {!showHistory && filteredLiveLogs.length === 0 && (
