@@ -144,8 +144,15 @@ class AutomationController {
 			}
 		}
 
+		let maxActions = 20;
+		try {
+			const configuredMax = Number(DataService.getAppConfig().sundul_max_actions);
+			if (Number.isInteger(configuredMax) && configuredMax > 0) {
+				maxActions = Math.min(configuredMax, 100);
+			}
+		} catch (_e) {}
+
 		const queue = QueueService.getQueue("sundul");
-		
 		const started = queue.startSundul(
 			targetTitles,
 			targetAccountName,
@@ -154,8 +161,10 @@ class AutomationController {
 		);
 		if (started) {
 			const msg = autoMode
-				? `Sundul otomatis dimulai untuk ${targetAccountName}.`
-				: `Sundul ${targetTitles.length} postingan dimulai untuk ${targetAccountName}.`;
+				? `Sundul otomatis dimulai untuk ${targetAccountName} (maks ${maxActions} per run).`
+				: targetTitles.length > maxActions
+					? `Sundul ${maxActions} dari ${targetTitles.length} postingan dimulai untuk ${targetAccountName}. Sisa ${targetTitles.length - maxActions} akan dicoba pada run berikutnya.`
+					: `Sundul ${targetTitles.length} postingan dimulai untuk ${targetAccountName}.`;
 			res.json({ success: true, message: msg });
 		} else {
 			res.status(400).json({ error: queueBusyMessage("sundul") });

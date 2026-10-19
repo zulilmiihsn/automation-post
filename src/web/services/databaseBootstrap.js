@@ -15,6 +15,7 @@ function initializeDatabase(db) {
 		["ai_model", "qwen/qwen3.8-27b"],
 		["headless_mode", "1"],
 		["anti_detect_enabled", "1"],
+		["sundul_max_actions", "20"],
 	];
 	const seedConfig = db.prepare("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)");
 	db.transaction(() => {

@@ -1,5 +1,6 @@
 process.env.NODE_ENV = "test";
 
+const fs = require("node:fs");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 
@@ -13,6 +14,7 @@ jest.mock("../src/web/services/dataService", () => ({
 
 const { spawn } = require("node:child_process");
 const QueueService = require("../src/web/services/queueService");
+const DataService = require("../src/web/services/dataService");
 
 function makeFakeProcess() {
 	const proc = new EventEmitter();
@@ -39,6 +41,7 @@ describe("QueueService exclusive automation lock", () => {
 		for (const proc of procs) proc.emit("close", 0);
 		procs = [];
 		spawn.mockReset();
+		DataService.getAppConfig.mockReturnValue({});
 	});
 
 	test("blocks a different automation mode while one is running", () => {
@@ -105,6 +108,27 @@ describe("QueueService exclusive automation lock", () => {
 				success: false,
 			}),
 		);
+	});
+
+	test("passes configured sundul max and titles through a temp JSON file", () => {
+		DataService.getAppConfig.mockReturnValue({
+			headless_mode: "1",
+			sundul_max_actions: "7",
+		});
+		const sundul = QueueService.getQueue("sundul");
+
+		expect(sundul.startSundul(["Honda Beat, 2024"], "Akun 1", "profiles/akun_1", "akun_1")).toBe(true);
+
+		const args = spawn.mock.calls[0][1];
+		expect(args).toContain("--max=7");
+		const titlesArg = args.find((arg) => arg.startsWith("--titles-file="));
+		expect(titlesArg).toBeDefined();
+
+		const titlesFile = titlesArg.slice("--titles-file=".length);
+		expect(JSON.parse(fs.readFileSync(titlesFile, "utf8"))).toEqual(["Honda Beat, 2024"]);
+
+		procs[0].emit("close", 0);
+		expect(fs.existsSync(titlesFile)).toBe(false);
 	});
 
 	test("scraper uses the same lock and receives profile and group env", () => {

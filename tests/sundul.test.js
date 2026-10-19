@@ -1,3 +1,6 @@
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const {
 	buildListingKey,
 	evaluateListingEligibility,
@@ -98,10 +101,18 @@ describe("Sundul rules", () => {
 		expect(exact.listing.title).toBe("Honda Beat Deluxe 2024");
 
 		const ambiguous = findBestListingMatch("Honda Beat 2024", [
-			{ title: "Honda Beat 2024 Samarinda" },
-			{ title: "Honda Beat 2024 Balikpapan" },
+			{ title: "Honda Beat 2024" },
+			{ title: "2024 Honda Beat" },
 		]);
 		expect(ambiguous).toBeNull();
+	});
+
+	test("rejects a different model variant at the safer default threshold", () => {
+		expect(
+			findBestListingMatch("Honda Beat 2024", [
+				{ title: "Honda Beat Deluxe 2024" },
+			]),
+		).toBeNull();
 	});
 
 	test("never reports renew success without Facebook or post-reload evidence", () => {
@@ -123,5 +134,18 @@ describe("Sundul rules", () => {
 		expect(parseCliArgs(["--auto", "--max=5"]).maxActions).toBe(5);
 		expect(parseCliArgs(["--auto", "--max=999"]).maxActions).toBe(100);
 		expect(parseCliArgs(["--auto", "--max=0"]).maxActions).toBe(20);
+	});
+
+	test("reads titles from a JSON file without comma splitting", () => {
+		const titlesFile = path.join(
+			os.tmpdir(),
+			`sundul-titles-test-${process.pid}-${Date.now()}.json`,
+		);
+		fs.writeFileSync(titlesFile, JSON.stringify(["Honda Beat, 2024", "Vario 125 2025"]));
+
+		const parsed = parseCliArgs([`--titles-file=${titlesFile}`]);
+
+		expect(parsed.titles).toEqual(["Honda Beat, 2024", "Vario 125 2025"]);
+		expect(fs.existsSync(titlesFile)).toBe(false);
 	});
 });

@@ -1,4 +1,6 @@
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const EventEmitter = require("node:events");
 const Logger = require("../../utils/logger");
@@ -8,6 +10,24 @@ const stripAnsi = (str) =>
 		/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
 		"",
 	);
+
+function writeTitlesFile(titles) {
+	const filePath = path.join(
+		os.tmpdir(),
+		`automation-post-sundul-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+	);
+	fs.writeFileSync(filePath, JSON.stringify(titles), { encoding: "utf8", mode: 0o600 });
+	return filePath;
+}
+
+function cleanupTitlesFile(filePath) {
+	if (!filePath) return;
+	try {
+		fs.rmSync(filePath, { force: true });
+	} catch {
+		// Best-effort cleanup; temp files are harmless if removal fails.
+	}
+}
 
 function parseChildLog(msg) {
 	let level = "info";
@@ -297,16 +317,28 @@ class JobQueue extends EventEmitter {
 	}
 
 	startSundul(titlesOrAuto, accountName = "", profileDir = null, accountId = null) {
-		const args = Array.isArray(titlesOrAuto)
-			? [`--titles=${titlesOrAuto.join(",")}`]
-			: ["--auto"];
+		let titlesFile = null;
+		let args;
+		if (Array.isArray(titlesOrAuto)) {
+			titlesFile = writeTitlesFile(titlesOrAuto);
+			args = [`--titles-file=${titlesFile}`];
+		} else {
+			args = ["--auto"];
+		}
 
 		let headless = "false";
+		let maxActions = 20;
 		try {
 			const DataService = require("./dataService");
-			const configVal = DataService.getAppConfig().headless_mode;
+			const config = DataService.getAppConfig();
+			const configVal = config.headless_mode;
 			headless = (configVal === "0" || configVal === "false" || configVal === false) ? "false" : "true";
+			const configuredMax = Number(config.sundul_max_actions);
+			if (Number.isInteger(configuredMax) && configuredMax > 0) {
+				maxActions = Math.min(configuredMax, 100);
+			}
 		} catch (e) {}
+		args.push(`--max=${maxActions}`);
 
 		const envOverrides = { HEADLESS: headless };
 		if (profileDir) {
@@ -315,13 +347,25 @@ class JobQueue extends EventEmitter {
 			envOverrides.SUNDUL_ACCOUNT_ID = accountId || accountName;
 		}
 
-		return this._spawnProcess(
+		const started = this._spawnProcess(
 			path.join(__dirname, "../../../scripts/sundul.js"),
 			args,
 			"sundul",
 			"Sundul",
 			{ envOverrides },
 		);
+
+		if (!started) {
+			cleanupTitlesFile(titlesFile);
+			return false;
+		}
+
+		if (titlesFile && this.currentProcess) {
+			const cleanup = () => cleanupTitlesFile(titlesFile);
+			this.currentProcess.once("close", cleanup);
+			this.currentProcess.once("error", cleanup);
+		}
+		return true;
 	}
 
 	stopAutomation() {

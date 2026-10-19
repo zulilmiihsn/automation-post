@@ -1,4 +1,5 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MATCH_SCORE = 0.75;
 
 const TITLE_STOP_WORDS = new Set([
 	"ready",
@@ -85,7 +86,7 @@ function titleMatchScore(targetTitle, candidateTitle) {
 	return intersection.length / union.size;
 }
 
-function findBestListingMatch(targetTitle, listings, minimumScore = 0.4) {
+function findBestListingMatch(targetTitle, listings, minimumScore = DEFAULT_MATCH_SCORE) {
 	const ranked = listings
 		.map((listing) => ({ listing, score: titleMatchScore(targetTitle, listing.title) }))
 		.filter((entry) => entry.score >= minimumScore)

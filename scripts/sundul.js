@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const path = require("node:path");
 const BrowserManager = require("../src/core/browserManager");
 const Logger = require("../src/utils/logger");
@@ -35,6 +36,27 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DEFAULT_MAX_ACTIONS = 20;
 const VERIFY_RELOAD_DELAY_MS = Number(process.env.SUNDUL_VERIFY_RELOAD_DELAY_MS) || 1800;
 
+function readTitlesFile(filePath) {
+	try {
+		const raw = fs.readFileSync(filePath, "utf8");
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) {
+			throw new Error("Isi file judul harus berupa array JSON.");
+		}
+		return parsed
+			.map((title) => String(title).trim())
+			.filter(Boolean);
+	} catch (error) {
+		throw new Error(`Gagal membaca daftar judul sundul: ${error.message}`);
+	} finally {
+		try {
+			fs.unlinkSync(filePath);
+		} catch {
+			// Best-effort cleanup; queue juga membersihkan file saat proses selesai.
+		}
+	}
+}
+
 function parseCliArgs(argv = process.argv.slice(2)) {
 	const autoMode = argv.includes("--auto");
 	const dryRun = argv.includes("--dry-run");
@@ -43,14 +65,17 @@ function parseCliArgs(argv = process.argv.slice(2)) {
 	const maxActions = Number.isInteger(parsedMax) && parsedMax > 0
 		? Math.min(parsedMax, 100)
 		: DEFAULT_MAX_ACTIONS;
+	const titlesFileArg = argv.find((arg) => arg.startsWith("--titles-file="));
 	const titlesArg = argv.find((arg) => arg.startsWith("--titles="));
-	const titles = titlesArg
-		? titlesArg
-			.slice("--titles=".length)
-			.split(",")
-			.map((title) => title.trim())
-			.filter(Boolean)
-		: [];
+	const titles = titlesFileArg
+		? readTitlesFile(titlesFileArg.slice("--titles-file=".length))
+		: titlesArg
+			? titlesArg
+				.slice("--titles=".length)
+				.split(",")
+				.map((title) => title.trim())
+				.filter(Boolean)
+			: [];
 	return { autoMode, dryRun, maxActions, titles };
 }
 

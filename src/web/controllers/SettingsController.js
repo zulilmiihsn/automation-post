@@ -8,6 +8,7 @@ const NUMERIC_LIMITS = {
 	rate_limit_likes_per_day: { min: 0, max: 1000 },
 	rate_limit_posts_per_day: { min: 0, max: 1000 },
 	rate_limit_comments_per_day: { min: 0, max: 1000 },
+	sundul_max_actions: { min: 1, max: 100 },
 };
 const BOOLEAN_KEYS = new Set(["headless_mode", "ai_chat_enabled", "anti_detect_enabled", "anti_detect_mouse"]);
 const TEXT_LIMITS = {
@@ -71,6 +72,7 @@ class SettingsController {
 				"scraper_account_id", "debug_account_id",
 				"headless_mode", "max_retries", "page_timeout",
 				"rate_limit_likes_per_day", "rate_limit_posts_per_day", "rate_limit_comments_per_day",
+				"sundul_max_actions",
 			"ai_chat_enabled", "ai_model", "chat_enabled_accounts",
 			"anti_detect_enabled", "anti_detect_viewport", "anti_detect_ua", "anti_detect_mouse",
 			];

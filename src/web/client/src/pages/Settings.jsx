@@ -281,6 +281,7 @@ export default function Settings({ theme = 'dark', onThemeChange = () => {} }) {
           </header>
           <div className={styles.settingsRows}>
             {renderConfigRow("Mode browser", "headless_mode", { type: 'toggle', help: 'Headless menjalankan browser di latar. Matikan untuk melihat proses browser.' })}
+            {renderConfigRow("Maksimal sundul per run", "sundul_max_actions", { type: 'number', min: 1, max: 100, placeholder: '20', help: 'Batas jumlah listing yang disundul dalam satu proses. Sisa target dicoba pada run berikutnya.' })}
           </div>
         </section>
       )}

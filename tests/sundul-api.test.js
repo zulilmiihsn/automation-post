@@ -11,6 +11,7 @@ jest.mock("../src/web/services/queueService", () => {
 jest.mock("../src/web/services/dataService", () => ({
 	getAccounts: jest.fn(async () => []),
 	getListings: jest.fn(async () => []),
+	getAppConfig: jest.fn(() => ({})),
 }));
 
 jest.mock("../src/core/browserManager", () => jest.fn());
@@ -43,6 +44,7 @@ describe("Sundul API", () => {
 		startSundul.mockReturnValue(true);
 		DataService.getAccounts.mockResolvedValue([]);
 		DataService.getListings.mockResolvedValue([]);
+		DataService.getAppConfig.mockReturnValue({});
 	});
 
 	test("starts true Facebook auto scan without local listing IDs", async () => {
@@ -71,6 +73,27 @@ describe("Sundul API", () => {
 
 		expect(res.statusCode).toBe(400);
 		expect(startSundul).not.toHaveBeenCalled();
+	});
+
+	test("tells how many selected listings will run when capped by config", async () => {
+		DataService.getListings.mockResolvedValue([
+			{ id: "1", title: "Honda Beat 2024" },
+			{ id: "2", title: "Vario 125 2025" },
+		]);
+		DataService.getAppConfig.mockReturnValue({ sundul_max_actions: "1" });
+		const req = { body: { ids: ["1", "2"] } };
+		const res = createResponse();
+
+		await ApiController.runSundul(req, res);
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body.message).toMatch(/1 dari 2/);
+		expect(startSundul).toHaveBeenCalledWith(
+			["Honda Beat 2024", "Vario 125 2025"],
+			"Semua Akun Aktif",
+			null,
+			null,
+		);
 	});
 
 	test("rejects selected account that is inactive or not linked", async () => {
