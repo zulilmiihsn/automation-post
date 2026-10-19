@@ -161,7 +161,7 @@ class AutomationController {
 		);
 		if (started) {
 			const msg = autoMode
-				? `Sundul otomatis dimulai untuk ${targetAccountName} (maks ${maxActions} per run).`
+				? `Sundul otomatis dimulai untuk ${targetAccountName} (maks ${maxActions} per akun).`
 				: targetTitles.length > maxActions
 					? `Sundul ${maxActions} dari ${targetTitles.length} postingan dimulai untuk ${targetAccountName}. Sisa ${targetTitles.length - maxActions} akan dicoba pada run berikutnya.`
 					: `Sundul ${targetTitles.length} postingan dimulai untuk ${targetAccountName}.`;
