@@ -88,6 +88,28 @@ describe("Sundul rules", () => {
 		expect(result).toMatchObject({ eligible: false, reason: "recently-renewed" });
 	});
 
+	test("uses stable listing id and honors legacy title renewal keys", () => {
+		const listing = {
+			title: "Yamaha NMAX 2024",
+			listingId: "987",
+			active: true,
+			warning: null,
+			ageText: "Ditawarkan 2 minggu lalu",
+		};
+
+		expect(buildListingKey(listing)).toBe("987");
+
+		const result = evaluateListingEligibility(listing, {
+			now,
+			recentKeys: new Set(["yamaha nmax 2024"]),
+		});
+		expect(result).toMatchObject({
+			eligible: false,
+			reason: "recently-renewed",
+			key: "987",
+		});
+	});
+
 	test("requires matching numeric tokens in fuzzy title matching", () => {
 		expect(titleMatchScore("Yamaha Aerox 2019", "Yamaha Aerox 2024")).toBe(0);
 		expect(titleMatchScore("Honda Vario Tahun 2025", "Honda Vario 2025")).toBe(1);

@@ -292,7 +292,15 @@ async function extractVisibleListings(page) {
 
 			const linkEl = card.querySelector('a[href*="/marketplace/item/"]');
 			const link = linkEl ? linkEl.href : "";
-			const idMatch = link.match(/\/marketplace\/item\/(\d+)/i);
+			let idMatch = link.match(/\/marketplace\/item\/(\d+)/i);
+
+			// Kartu "selling" sering tidak punya link item, tetapi tombol promosi
+			// menyimpan target_id listing yang stabil dan unik per kartu.
+			if (!idMatch) {
+				const promoteLink = card.querySelector('a[href*="target_id="]');
+				const promoteHref = promoteLink?.getAttribute("href") || "";
+				idMatch = promoteHref.match(/[?&]target_id=(\d+)/i);
+			}
 
 			// Deteksi Pintasan Langsung: "Tip: Renew your listing?" / "Tips: Perbarui tawaran Anda?"
 			const hasDirectRenew = /renew your listing|perbarui tawaran anda|perbarui listingan/i.test(cardText);
@@ -342,9 +350,9 @@ async function extractVisibleListings(page) {
 			if (!title || /duplikat|duplicate|sepertinya anda|it looks like/i.test(title)) continue;
 
 			const ageText = lines.find((line) =>
-				/(Diperbarui|Renewed|Ditawarkan|Offered|Listed|pada|on)\b.*\d+/i.test(line),
+				/\b(Diperbarui|Renewed|Ditawarkan|Offered|Listed|pada|on)\b.*\d+/i.test(line),
 			) || lines.find((line) =>
-				/(Diperbarui|Renewed|Ditawarkan|Offered|Listed)/i.test(line),
+				/\b(Diperbarui|Renewed|Ditawarkan|Offered|Listed)\b/i.test(line),
 			) || "";
 
 			let warning = null;
@@ -352,7 +360,12 @@ async function extractVisibleListings(page) {
 			else if (/ditolak|rejected/i.test(cardText)) warning = "rejected";
 			else if (/\b(draf|draft)\b/i.test(cardText)) warning = "draft";
 			else if (/menunggu persetujuan|pending/i.test(cardText)) warning = "pending";
-			else if (/stok habis|sold out/i.test(cardText)) warning = "sold";
+			else if (
+				/stok habis|sold out/i.test(cardText) &&
+				!/tandai sebagai stok habis|mark as out of stock/i.test(cardText)
+			) {
+				warning = "sold";
+			}
 			else if (/\bterjual\b/i.test(cardText) && !/tandai sebagai terjual/i.test(cardText)) warning = "sold";
 			else if (/\bsold\b/i.test(cardText) && !/mark as sold/i.test(cardText)) warning = "sold";
 
@@ -486,28 +499,8 @@ async function findOptionsButton(page, listing, maxScrolls = 80, { matchAge = fa
 						.replace(/^more options for\s*/i, "")
 						.trim();
 
-					let isMatch = false;
-
-					// 1. Cocokkan ID jika ada
-					if (listingId) {
-						const card =
-							btn.closest('div[role="article"], div[data-pagelet], div[role="button"]') ||
-							btn.parentElement;
-						if (card?.querySelector(`a[href*="/marketplace/item/${listingId}"]`)) {
-							isMatch = true;
-						}
-					}
-
-					// 2. Cocokkan judul secara ketat. Judul target berasal dari kartu
-					// Facebook itu sendiri, jadi variasi token longgar hanya berisiko
-					// menangkap listing lain yang mirip (mis. "[READY BERAU] ...").
-					if (!isMatch && btnAria) {
-						isMatch = btnAria === normalizedTitle || btnAria.includes(normalizedTitle);
-					}
-
-					if (!isMatch) continue;
-
-					// Cari container kartu untuk verifikasi teks & alert badge
+					// Cari container kartu lebih dulu. ID dan teks harus berasal
+					// dari kartu yang sama, bukan wrapper berisi banyak kartu.
 					let card = btn;
 					for (let depth = 0; depth < 8 && card; depth += 1) {
 						if (card.getAttribute("role") === "button" && card !== btn) break;
@@ -516,6 +509,39 @@ async function findOptionsButton(page, listing, maxScrolls = 80, { matchAge = fa
 					}
 
 					const cardText = card ? norm(card.innerText) : "";
+					const idLinks = card
+						? Array.from(
+								card.querySelectorAll(
+									'a[href*="/marketplace/item/"], a[href*="target_id="]',
+								),
+							)
+						: [];
+
+					let isMatch = false;
+					let hasCardId = false;
+
+					// 1. Cocokkan ID jika kartu punya ID. target_id berasal dari link
+					// promosi dan membedakan listing berjudul sama persis.
+					if (listingId && idLinks.length > 0) {
+						hasCardId = true;
+						const idPattern = new RegExp(`[?&]target_id=${listingId}(?:&|$)`);
+						isMatch = idLinks.some((anchor) => {
+							const href = anchor.getAttribute("href") || "";
+							return (
+								href.includes(`/marketplace/item/${listingId}`) ||
+								idPattern.test(href)
+							);
+						});
+					}
+
+					// 2. Fallback judul hanya untuk kartu tanpa ID. Jika kartu punya
+					// ID tetapi tidak cocok, jangan pernah jatuh ke judul: duplikat
+					// berjudul sama bisa tertukar.
+					if (!isMatch && !hasCardId && btnAria) {
+						isMatch = btnAria === normalizedTitle || btnAria.includes(normalizedTitle);
+					}
+
+					if (!isMatch) continue;
 
 					// Cek apakah kartu memiliki badge alert warning duplikat / ditolak / draf
 					if (
@@ -728,14 +754,14 @@ async function waitForSuccessSignal(page, timeoutMs = 6500) {
 		.catch(() => false);
 }
 
-async function clickModalDetailRenew(page, targetTitle) {
+async function clickModalDetailRenew(page, listing) {
 	if (!page.url().includes("/marketplace/you/selling")) {
 		await page.goto(SELLING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 		await delay(1200);
 	}
 
 	// 1. Klik kartu produk untuk membuka modal dialog "Penawaran Anda" / "Your listing"
-	const opened = await page.evaluate((title) => {
+	const opened = await page.evaluate(({ title, listingId }) => {
 		const norm = (s) =>
 			(s || "")
 				.toLowerCase()
@@ -750,6 +776,9 @@ async function clickModalDetailRenew(page, targetTitle) {
 		for (const card of cards) {
 			if (card.dataset.sundulProcessedModal === "true") continue;
 			if (card.closest('a[href*="/help/"]')) continue;
+			if (/^Opsi lainnya|^More options/i.test(card.getAttribute("aria-label") || "")) {
+				continue;
+			}
 
 			const cardText = norm(card.innerText);
 			if (
@@ -772,15 +801,38 @@ async function clickModalDetailRenew(page, targetTitle) {
 				continue;
 			}
 
-			const aria = norm(card.getAttribute("aria-label"));
-			if (aria === title || aria.includes(title) || cardText.includes(title)) {
+			let matched = false;
+			let hasCardId = false;
+			if (listingId) {
+				const idPattern = new RegExp(`[?&]target_id=${listingId}(?:&|$)`);
+				const idLinks = Array.from(
+					card.querySelectorAll('a[href*="/marketplace/item/"], a[href*="target_id="]'),
+				);
+				if (idLinks.length > 0) {
+					hasCardId = true;
+					matched = idLinks.some((anchor) => {
+						const href = anchor.getAttribute("href") || "";
+						return href.includes(`/marketplace/item/${listingId}`) || idPattern.test(href);
+					});
+				}
+			}
+
+			if (!matched && !hasCardId) {
+				const aria = norm(card.getAttribute("aria-label"));
+				matched = aria === title || aria.includes(title) || cardText.includes(title);
+			}
+
+			if (matched) {
 				card.dataset.sundulProcessedModal = "true";
 				card.click();
 				return true;
 			}
 		}
 		return false;
-	}, normalizeTitle(targetTitle));
+	}, {
+		title: normalizeTitle(listing.title),
+		listingId: listing.listingId || "",
+	});
 
 	if (!opened) return { clicked: false, reason: "card-not-found" };
 	await delay(1200);
@@ -901,7 +953,7 @@ async function renewListing(page, listing) {
 	// ==========================================
 	logger.info(`[DEBUG] [JALUR 2 - FALLBACK] Mencoba via Modal Detail Penawaran untuk "${listing.title}"...`);
 	await closeOverlays(page);
-	const modalResult = await clickModalDetailRenew(page, listing.title);
+	const modalResult = await clickModalDetailRenew(page, listing);
 
 	if (modalResult.clicked) {
 		logger.info(`[DEBUG] [KLIK SUKSES] Tombol "${modalResult.text}" di modal dialog BERHASIL DIKLIK untuk "${listing.title}"`);

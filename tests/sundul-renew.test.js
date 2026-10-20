@@ -146,4 +146,20 @@ describe("selectTargets dedupe", () => {
 
 		expect(result).toHaveLength(1);
 	});
+
+	test("keeps duplicate titles separate when Facebook listing ids differ", () => {
+		const result = selectTargets({
+			autoMode: true,
+			titles: [],
+			listings: [
+				{ ...listing, listingId: "111" },
+				{ ...listing, listingId: "222" },
+			],
+			recentKeys: new Set(),
+			localListings: [],
+		});
+
+		expect(result).toHaveLength(2);
+		expect(result.map((entry) => entry.eligibility.key)).toEqual(["111", "222"]);
+	});
 });

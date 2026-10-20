@@ -233,14 +233,19 @@ function evaluateListingEligibility(
 	{ recentKeys = new Set(), minimumAgeDays = 7, now = new Date() } = {},
 ) {
 	const key = buildListingKey(listing);
+	const titleKey = normalizeTitle(listing.title);
+	// Record lama memakai judul sebagai key. Saat kartu sudah punya listing ID,
+	// tetap hormati record lama agar listing tidak langsung disundul ulang.
+	const recentlyRenewed =
+		recentKeys.has(key) || (key !== titleKey && recentKeys.has(titleKey));
 	const ageDays = parseListingAgeDays(listing.ageText, now);
 
-	if (listing.hasDirectRenew && !recentKeys.has(key) && listing.active !== false && !listing.warning) {
+	if (listing.hasDirectRenew && !recentlyRenewed && listing.active !== false && !listing.warning) {
 		return { eligible: true, reason: "eligible", key, ageDays: ageDays ?? 7 };
 	}
 	if (!listing.active) return { eligible: false, reason: "inactive", key, ageDays };
 	if (listing.warning) return { eligible: false, reason: listing.warning, key, ageDays };
-	if (recentKeys.has(key)) return { eligible: false, reason: "recently-renewed", key, ageDays: ageDays ?? 0 };
+	if (recentlyRenewed) return { eligible: false, reason: "recently-renewed", key, ageDays: ageDays ?? 0 };
 
 	if (ageDays === null) return { eligible: false, reason: "unknown-age", key, ageDays };
 	if (ageDays < minimumAgeDays) return { eligible: false, reason: "too-new", key, ageDays };
