@@ -88,7 +88,7 @@ describe("Sundul rules", () => {
 		expect(result).toMatchObject({ eligible: false, reason: "recently-renewed" });
 	});
 
-	test("uses stable listing id and honors legacy title renewal keys", () => {
+	test("keeps duplicate titles eligible when cards have stable ids", () => {
 		const listing = {
 			title: "Yamaha NMAX 2024",
 			listingId: "987",
@@ -103,11 +103,20 @@ describe("Sundul rules", () => {
 			now,
 			recentKeys: new Set(["yamaha nmax 2024"]),
 		});
-		expect(result).toMatchObject({
-			eligible: false,
-			reason: "recently-renewed",
-			key: "987",
-		});
+		expect(result).toMatchObject({ eligible: true, reason: "eligible", key: "987" });
+	});
+
+	test("blocks cards without stable ids using legacy title keys", () => {
+		const result = evaluateListingEligibility(
+			{
+				title: "Yamaha NMAX 2024",
+				active: true,
+				warning: null,
+				ageText: "Ditawarkan 2 minggu lalu",
+			},
+			{ now, recentKeys: new Set(["yamaha nmax 2024"]) },
+		);
+		expect(result).toMatchObject({ eligible: false, reason: "recently-renewed" });
 	});
 
 	test("requires matching numeric tokens in fuzzy title matching", () => {

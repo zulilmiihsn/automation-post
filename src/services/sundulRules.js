@@ -234,10 +234,15 @@ function evaluateListingEligibility(
 ) {
 	const key = buildListingKey(listing);
 	const titleKey = normalizeTitle(listing.title);
-	// Record lama memakai judul sebagai key. Saat kartu sudah punya listing ID,
-	// tetap hormati record lama agar listing tidak langsung disundul ulang.
+	// Kartu dengan ID stabil dinilai per kartu. Record lama berbasis judul hanya
+	// dipakai untuk kartu yang benar-benar tidak punya ID, supaya duplikat lain
+	// dengan judul sama tetap bisa disundul. Kartu yang masih cooldown akan
+	// ditolak aman oleh menu Facebook saat aksi.
+	const hasStableId = Boolean(
+		listing.listingId || /\/marketplace\/item\/\d+/i.test(String(listing.href || "")),
+	);
 	const recentlyRenewed =
-		recentKeys.has(key) || (key !== titleKey && recentKeys.has(titleKey));
+		recentKeys.has(key) || (!hasStableId && recentKeys.has(titleKey));
 	const ageDays = parseListingAgeDays(listing.ageText, now);
 
 	if (listing.hasDirectRenew && !recentlyRenewed && listing.active !== false && !listing.warning) {
