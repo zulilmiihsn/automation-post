@@ -47,6 +47,7 @@ function createMenuPage({ successSignal, renewEnabled = true, postReloadRenewEna
 	const page = {
 		url: jest.fn(() => "https://www.facebook.com/marketplace/you/selling"),
 		goto: jest.fn(async () => {}),
+		evaluate: jest.fn(async () => true),
 		$$: jest.fn(async (selector) => {
 			if (selector.includes('[role="menuitem"]')) {
 				const menu = menus[Math.min(menuIndex, menus.length - 1)];

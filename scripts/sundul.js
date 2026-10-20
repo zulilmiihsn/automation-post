@@ -28,8 +28,6 @@ const SUCCESS_TEXT = [
 	"renewed successfully",
 	"offer renewed",
 	"item renewed",
-	"renewed",
-	"diperbarui",
 ];
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -209,12 +207,13 @@ async function detectRestriction(page) {
 	}, SELECTORS.RESTRICTION_INDICATORS);
 }
 
-async function scrollMarketplace(page, attempts = 10) {
+async function scrollMarketplace(page, attempts = 1, fraction = 0.7) {
 	for (let index = 0; index < attempts; index += 1) {
-		await page.evaluate(() => {
-			window.scrollBy(0, window.innerHeight * 1.5);
-			window.scrollTo(0, document.body.scrollHeight);
-		});
+		await page
+			.evaluate((scrollFraction) => {
+				window.scrollBy(0, Math.max(200, Math.floor(window.innerHeight * scrollFraction)));
+			}, fraction)
+			.catch(() => {});
 		await delay(600);
 	}
 }
@@ -223,7 +222,12 @@ async function extractVisibleListings(page) {
 	return page.evaluate((optionsSelector) => {
 		const isVisible = (element) => {
 			const rect = element.getBoundingClientRect();
-			return rect.width > 0 && rect.height > 0;
+			return (
+				rect.width > 0 &&
+				rect.height > 0 &&
+				rect.bottom > 0 &&
+				rect.top < window.innerHeight
+			);
 		};
 
 		// 1. Ambil semua tombol opsi atau tombol tindakan pada setiap kartu
@@ -376,22 +380,36 @@ async function discoverListings(page, minTarget = 250) {
 	await page.evaluate(() => window.scrollTo(0, 0));
 	await delay(400);
 	const discovered = [];
-	const seenKeys = new Set();
+	const keyFor = (listing) =>
+		listing.listingId
+			? String(listing.listingId)
+			: listing.href && listing.href.includes("/marketplace/item/")
+				? listing.href
+				: `${normalizeTitle(listing.title)}_${normalizeTitle(listing.ageText)}`;
 	let stagnantBatches = 0;
 	let lastCount = 0;
 
 	for (let batch = 0; batch < 150; batch += 1) {
 		const visible = await extractVisibleListings(page);
 		for (const listing of visible) {
-			const key = listing.listingId
-				? String(listing.listingId)
-				: (listing.href && listing.href.includes("/marketplace/item/"))
-				? listing.href
-				: `${normalizeTitle(listing.title)}_${normalizeTitle(listing.ageText)}`;
-
-			if (!seenKeys.has(key)) {
-				seenKeys.add(key);
+			const key = keyFor(listing);
+			const existingIndex = discovered.findIndex((item) => keyFor(item) === key);
+			if (existingIndex === -1) {
 				discovered.push(listing);
+				continue;
+			}
+
+			// Kartu yang sama bisa muncul sebagai versi duplikat lalu versi aktif.
+			// Simpan versi yang paling layak diproses, bukan sekadar yang pertama terlihat.
+			const existing = discovered[existingIndex];
+			const existingScore =
+				Number(Boolean(existing.active && !existing.warning)) +
+				Number(Boolean(existing.hasDirectRenew));
+			const listingScore =
+				Number(Boolean(listing.active && !listing.warning)) +
+				Number(Boolean(listing.hasDirectRenew));
+			if (listingScore > existingScore) {
+				discovered[existingIndex] = listing;
 			}
 		}
 
@@ -412,20 +430,29 @@ async function discoverListings(page, minTarget = 250) {
 			break;
 		}
 
-		await scrollMarketplace(page, 2);
+		await scrollMarketplace(page, 1, 0.7);
 	}
 	return discovered;
 }
 
-async function findOptionsButton(page, listing, maxScrolls = 40) {
+async function findOptionsButton(page, listing, maxScrolls = 80, { matchAge = false } = {}) {
 	if (!page.url().includes("/marketplace/you/selling")) {
 		await page.goto(SELLING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 		await delay(1200);
 	}
 
+	// Selalu mulai dari atas. Setelah scan, halaman biasanya berada di bawah;
+	// mencari dari posisi itu membuat target di atas terlewat.
+	await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+	await delay(500);
+
+	const normalizedTitle = normalizeTitle(listing.title);
+	const normalizedAge = matchAge ? normalizeTitle(listing.ageText || "") : "";
+	let stagnantScrolls = 0;
+
 	for (let attempt = 0; attempt <= maxScrolls; attempt += 1) {
 		const handle = await page.evaluateHandle(
-			({ listingId, normalizedTitle, ageText }) => {
+			({ listingId, normalizedTitle, normalizedAge }) => {
 				const norm = (s) =>
 					(s || "")
 						.toLowerCase()
@@ -433,10 +460,14 @@ async function findOptionsButton(page, listing, maxScrolls = 40) {
 						.replace(/\s+/g, " ")
 						.trim();
 
-				const normTarget = normalizedTitle;
-				const targetTokens = normTarget.split(" ").filter((t) => t.length > 2);
+				// Hanya tombol yang benar-benar terlihat di viewport. Facebook menyimpan
+				// kartu lama/offscreen di DOM; mengkliknya bisa menggulir ke area kosong.
+				const isInViewport = (rect) =>
+					rect.width > 0 &&
+					rect.height > 0 &&
+					rect.top >= 64 &&
+					rect.bottom <= window.innerHeight - 8;
 
-				// Ambil SEMUA tombol opsi titik tiga fisik di halaman
 				const buttons = Array.from(
 					document.querySelectorAll(
 						'div[role="button"][aria-label^="Opsi lainnya untuk"], div[role="button"][aria-label^="More options for"], [aria-label*="Opsi lainnya untuk"], [aria-label*="More options for"]',
@@ -444,19 +475,41 @@ async function findOptionsButton(page, listing, maxScrolls = 40) {
 				);
 
 				for (const btn of buttons) {
-					// Abaikan jika tombol titik tiga ini sudah pernah diproses
 					if (btn.dataset.sundulProcessed === "true") continue;
 					if (btn.closest('a[href*="/help/"]')) continue;
 
-					// Ambil judul kartu langsung dari aria-label tombol titik tiga itu sendiri
+					const rect = btn.getBoundingClientRect();
+					if (!isInViewport(rect)) continue;
+
 					const btnAria = norm(btn.getAttribute("aria-label") || "")
 						.replace(/^opsi lainnya untuk\s*/i, "")
 						.replace(/^more options for\s*/i, "")
 						.trim();
 
+					let isMatch = false;
+
+					// 1. Cocokkan ID jika ada
+					if (listingId) {
+						const card =
+							btn.closest('div[role="article"], div[data-pagelet], div[role="button"]') ||
+							btn.parentElement;
+						if (card?.querySelector(`a[href*="/marketplace/item/${listingId}"]`)) {
+							isMatch = true;
+						}
+					}
+
+					// 2. Cocokkan judul secara ketat. Judul target berasal dari kartu
+					// Facebook itu sendiri, jadi variasi token longgar hanya berisiko
+					// menangkap listing lain yang mirip (mis. "[READY BERAU] ...").
+					if (!isMatch && btnAria) {
+						isMatch = btnAria === normalizedTitle || btnAria.includes(normalizedTitle);
+					}
+
+					if (!isMatch) continue;
+
 					// Cari container kartu untuk verifikasi teks & alert badge
 					let card = btn;
-					for (let d = 0; d < 8 && card; d += 1) {
+					for (let depth = 0; depth < 8 && card; depth += 1) {
 						if (card.getAttribute("role") === "button" && card !== btn) break;
 						if (card.getAttribute("role") === "article" || card.dataset.pagelet) break;
 						card = card.parentElement;
@@ -475,43 +528,59 @@ async function findOptionsButton(page, listing, maxScrolls = 40) {
 						continue;
 					}
 
-					let isMatch = false;
+					// Usia ikut dicocokkan saat aksi awal agar duplikat berjudul sama
+					// tidak saling tertukar. Saat verifikasi pasca-reload, teks usia
+					// bisa berubah menjadi "Diperbarui", jadi pencocokan usia tidak dipakai.
+					if (normalizedAge && !cardText.includes(normalizedAge)) continue;
 
-					// 1. Cocokkan ID jika ada
-					if (listingId && card && card.querySelector(`a[href*="/marketplace/item/${listingId}"]`)) {
-						isMatch = true;
-					}
-					// 2. Cocokkan via judul pada tombol titik tiga
-					else if (btnAria === normTarget || btnAria.includes(normTarget) || normTarget.includes(btnAria)) {
-						isMatch = true;
-					}
-					// 3. Cocokkan token kata kunci
-					else if (targetTokens.length >= 2 && targetTokens.every((t) => btnAria.includes(t))) {
-						isMatch = true;
+					const cx = rect.left + rect.width / 2;
+					const cy = rect.top + rect.height / 2;
+					const topElement = document.elementFromPoint(cx, cy);
+					if (topElement && !btn.contains(topElement) && !topElement.contains(btn)) {
+						continue;
 					}
 
-					if (isMatch) {
-						// Tandai tombol ini sebagai SUDAH DIPROSES
-						btn.dataset.sundulProcessed = "true";
-						btn.scrollIntoView({ block: "center" });
-						return btn;
-					}
+					// Tandai tombol ini sebagai SUDAH DIPROSES
+					btn.dataset.sundulProcessed = "true";
+					return btn;
 				}
 				return null;
 			},
 			{
 				listingId: listing.listingId || "",
-				normalizedTitle: normalizeTitle(listing.title),
-				ageText: listing.ageText || "",
+				normalizedTitle,
+				normalizedAge,
 			},
 		);
 
 		const element = handle.asElement();
 		if (element) return element;
 		await handle.dispose().catch(() => {});
+
 		if (attempt < maxScrolls) {
-			await page.evaluate(() => window.scrollBy(0, window.innerHeight * 1.5));
-			await delay(350);
+			const scrollState = await page
+				.evaluate(() => {
+					const beforeY = window.scrollY;
+					const beforeHeight = document.documentElement.scrollHeight;
+					window.scrollBy(0, Math.max(200, Math.floor(window.innerHeight * 0.7)));
+					return {
+						moved: window.scrollY > beforeY,
+						beforeHeight,
+						afterHeight: document.documentElement.scrollHeight,
+					};
+				})
+				.catch(() => ({ moved: false, beforeHeight: 0, afterHeight: 0 }));
+
+			// Facebook memuat kartu berikutnya secara lazy. Jangan berhenti pada
+			// satu kali "tidak bergerak"; beri waktu daftar bertambah dulu.
+			if (scrollState.moved || scrollState.afterHeight > scrollState.beforeHeight) {
+				stagnantScrolls = 0;
+				await delay(350);
+			} else {
+				stagnantScrolls += 1;
+				if (stagnantScrolls >= 8) break;
+				await delay(1200);
+			}
 		}
 	}
 	return null;
@@ -524,8 +593,10 @@ function isRenewActionText(text) {
 }
 
 async function findVisibleRenewAction(page) {
+	// Jangan pernah mengambil tombol "Perbarui" dari kartu lain di halaman.
+	// Hanya item di dalam menu dropdown yang boleh dianggap aksi sundul.
 	const elements = await page.$$(
-		'[role="menuitem"], [role="menu"] [role="button"], [role="menu"] div[tabindex="0"], div[role="menu"] span, button',
+		'[role="menu"] [role="menuitem"], [role="menu"] [role="button"], [role="menu"] div[tabindex="0"], [role="menu"] span',
 	);
 	for (const element of elements) {
 		if (!(await element.isVisible().catch(() => false))) continue;
@@ -540,10 +611,10 @@ async function findVisibleRenewAction(page) {
 	return null;
 }
 
-async function openListingMenu(page, listing) {
+async function openListingMenu(page, listing, { matchAge = false } = {}) {
 	await closeOverlays(page);
 	logger.info(`[DEBUG] [CARI] Mencari tombol opsi titik tiga [...] untuk "${listing.title}"...`);
-	const optionsButton = await findOptionsButton(page, listing);
+	const optionsButton = await findOptionsButton(page, listing, 80, { matchAge });
 	if (!optionsButton) {
 		logger.warn(`[DEBUG] [GAGAL] Tombol opsi titik tiga [...] tidak ditemukan untuk "${listing.title}".`);
 		return { opened: false, renewAction: null };
@@ -672,7 +743,6 @@ async function clickModalDetailRenew(page, targetTitle) {
 				.replace(/\s+/g, " ")
 				.trim();
 
-		const tokens = title.split(" ").filter((t) => t.length > 2);
 		const cards = Array.from(
 			document.querySelectorAll('div[role="button"][aria-label], div[role="article"], div[data-pagelet*="Item"]'),
 		);
@@ -692,10 +762,19 @@ async function clickModalDetailRenew(page, targetTitle) {
 				continue;
 			}
 
+			const rect = card.getBoundingClientRect();
+			if (
+				rect.width <= 0 ||
+				rect.height <= 0 ||
+				rect.top < 64 ||
+				rect.bottom > window.innerHeight - 8
+			) {
+				continue;
+			}
+
 			const aria = norm(card.getAttribute("aria-label"));
-			if (tokens.length >= 2 && (tokens.every((t) => aria.includes(t)) || tokens.every((t) => cardText.includes(t)))) {
+			if (aria === title || aria.includes(title) || cardText.includes(title)) {
 				card.dataset.sundulProcessedModal = "true";
-				card.scrollIntoView({ block: "center" });
 				card.click();
 				return true;
 			}
@@ -751,11 +830,14 @@ async function verifyRenewAfterReload(page, listing) {
 		await page.goto(SELLING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 		await delay(VERIFY_RELOAD_DELAY_MS);
 
-		const menu = await openListingMenu(page, listing);
+		const menu = await openListingMenu(page, listing, { matchAge: false });
 		const renewUnavailable = Boolean(menu.opened && menu.renewAction && !menu.renewAction.enabled);
-		const reason = menu.opened
-			? (menu.renewAction ? "cooldown-active" : "renew-action-missing")
-			: "menu-not-found";
+		let reason = "menu-not-found";
+		if (menu.opened) {
+			if (!menu.renewAction) reason = "renew-action-missing";
+			else if (!menu.renewAction.enabled) reason = "cooldown-active";
+			else reason = "renew-still-enabled";
+		}
 		await closeOverlays(page);
 		return { renewUnavailable, reason };
 	} catch (error) {
@@ -775,7 +857,7 @@ async function renewListing(page, listing) {
 	// JALUR 1 (UTAMA - Paling Cepat): Menu Titik Tiga [...]
 	// ==========================================
 	logger.info(`[DEBUG] [JALUR 1 - UTAMA] Membuka menu opsi titik tiga [...] untuk "${listing.title}"...`);
-	const menu = await openListingMenu(page, listing);
+	const menu = await openListingMenu(page, listing, { matchAge: true });
 
 	if (menu.opened && menu.renewAction) {
 		// Jika tombol dalam kondisi disabled (contoh: "Renew (3 days)" / "Renew (6 days)")
@@ -794,6 +876,8 @@ async function renewListing(page, listing) {
 		await clickConfirmationIfPresent(page);
 		const successSignal = await waitForSuccessSignal(page, 6500);
 
+		// Sinyal sukses spesifik dari Facebook sudah cukup. Fallback cooldown
+		// dipakai jika toast tidak muncul; cooldown bisa telat beberapa menit.
 		if (isRenewVerified({ successSignal })) {
 			await closeOverlays(page);
 			logger.info(`[DEBUG] [STEP LOLOS] Sundul terverifikasi via Jalur 1 (Menu Dropdown).`);
